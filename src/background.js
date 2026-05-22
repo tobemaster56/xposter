@@ -98,6 +98,9 @@ async function diagnoseActiveTab() {
 async function openArticles() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (tab?.id) {
+    if (/^https:\/\/(?:x|twitter)\.com\/compose\/articles(?:$|[/?#])/.test(tab.url || "")) {
+      return { ok: true, tabId: tab.id };
+    }
     await chrome.tabs.update(tab.id, { url: "https://x.com/compose/articles" });
     return { ok: true, tabId: tab.id };
   }
@@ -366,7 +369,7 @@ async function ensureRemoteImagePermission(url, sender = {}) {
     origin,
     tabId,
     grantedOrigins: all?.origins || [],
-    error: `Chrome has not granted image-site access for ${origin}. Click Allow image website in the xPoster side panel, choose Allow in Chrome's prompt, then click Check downloads and Import again. This is a Chrome permission step, not an X upload failure; until it is allowed, Markdown image links cannot become uploaded images in X.`
+    error: `Chrome has not granted image-site access for ${origin}. The article can still be written; this Markdown image link will stay as text until the image website is allowed from the xPoster side panel.`
   };
 }
 

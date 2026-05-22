@@ -16,6 +16,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   min-width: 320px;
@@ -38,7 +42,7 @@ button {
 
 .shell {
   min-height: 100vh;
-  padding: 14px;
+  padding: 14px 14px 18px;
   display: grid;
   grid-template-rows: auto;
   align-content: start;
@@ -180,7 +184,7 @@ h2 {
   padding: 0;
   list-style: none;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0;
   background: color-mix(in oklch, var(--paper), var(--paper-2) 22%);
 }
@@ -222,7 +226,7 @@ h2 {
 .quick-steps strong {
   display: block;
   color: var(--ink);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 820;
   line-height: 1.2;
   overflow: hidden;
@@ -234,7 +238,7 @@ h2 {
   display: block;
   margin-top: 1px;
   color: var(--muted);
-  font-size: 9.5px;
+  font-size: 10.5px;
   font-weight: 650;
   line-height: 1.25;
   overflow: hidden;
@@ -764,17 +768,22 @@ h2 {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   border: 1px solid var(--line);
-  background: var(--paper);
+  background: color-mix(in oklch, var(--paper-2), var(--paper) 72%);
 }
 
 .tab {
-  min-height: 32px;
+  min-height: 36px;
+  min-width: 0;
   background: transparent;
   color: var(--muted);
   border-right: 1px solid var(--line);
   cursor: pointer;
   font-size: 12px;
   font-weight: 780;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: background-color 160ms ease, color 160ms ease;
 }
 
 .tab:last-child {
@@ -782,8 +791,9 @@ h2 {
 }
 
 .tab.active {
-  background: var(--ink);
-  color: var(--paper);
+  background: var(--paper);
+  color: var(--signal);
+  box-shadow: inset 0 -2px 0 var(--signal);
 }
 
 .panel {
@@ -795,10 +805,34 @@ h2 {
 }
 
 .composer {
-  min-height: 360px;
-  grid-template-rows: auto auto 1fr auto;
+  position: relative;
+  min-height: min(680px, calc(100dvh - 146px));
+  grid-template-rows: auto auto minmax(300px, 1fr) auto auto auto;
   border: 1px solid var(--line);
   background: rgba(251, 250, 247, 0.86);
+  transition: border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease;
+}
+
+.composer.drag-active {
+  border-color: var(--signal);
+  background: color-mix(in oklch, var(--signal), var(--paper) 94%);
+  box-shadow: 0 18px 46px rgba(32, 31, 27, 0.14);
+}
+
+.composer.drag-active::after {
+  content: attr(data-drop-label);
+  position: absolute;
+  inset: 58px 12px 44px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  border: 2px dashed color-mix(in oklch, var(--signal), var(--paper) 12%);
+  background: color-mix(in oklch, var(--paper), var(--signal) 8%);
+  color: var(--signal);
+  font-size: 13px;
+  font-weight: 840;
+  text-transform: uppercase;
+  pointer-events: none;
 }
 
 .composer-head {
@@ -815,7 +849,6 @@ h2 {
   color: var(--muted);
   font-size: 12px;
   font-weight: 800;
-  text-transform: uppercase;
 }
 
 .draft-explainer {
@@ -2108,6 +2141,29 @@ textarea::placeholder {
   color: var(--danger);
 }
 
+.main-progress {
+  border-color: color-mix(in oklch, var(--signal), var(--line) 54%);
+  box-shadow: 0 12px 34px rgba(32, 31, 27, 0.09);
+}
+
+.main-progress[data-tone="idle"] {
+  border-color: color-mix(in oklch, var(--line), transparent 24%);
+}
+
+.main-progress[data-tone="work"],
+.main-progress[data-tone="done"],
+.main-progress[data-tone="ok"] {
+  border-color: color-mix(in oklch, var(--signal), var(--line) 38%);
+}
+
+.main-progress[data-tone="warn"] {
+  border-color: color-mix(in oklch, var(--warn), var(--line) 38%);
+}
+
+.main-progress[data-tone="error"] {
+  border-color: color-mix(in oklch, var(--danger), var(--line) 38%);
+}
+
 .recovery-panel {
   display: grid;
   gap: 10px;
@@ -2327,16 +2383,27 @@ textarea::placeholder {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   align-items: end;
-  gap: 10px;
-  padding: 11px 12px;
+  gap: 8px;
+  padding: 12px;
   border: 1px solid color-mix(in oklch, var(--signal), var(--line) 45%);
   background:
     linear-gradient(180deg, color-mix(in oklch, var(--signal), var(--paper) 94%), transparent 92px),
     var(--paper);
 }
 
+.publish-dock {
+  position: sticky;
+  bottom: 0;
+  z-index: 18;
+  margin-top: 0;
+  border-right: 0;
+  border-bottom: 0;
+  border-left: 0;
+  box-shadow: 0 -16px 30px rgba(32, 31, 27, 0.12);
+}
+
 .actions[data-empty="true"] {
-  display: none;
+  display: grid;
 }
 
 .action-primary-block,
@@ -2350,7 +2417,7 @@ textarea::placeholder {
 }
 
 .action-secondary-block {
-  display: grid;
+  display: none;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
 }
@@ -2368,7 +2435,6 @@ textarea::placeholder {
   font-size: 10px;
   font-weight: 820;
   line-height: 1;
-  text-transform: uppercase;
 }
 
 .import-hint {
@@ -2453,10 +2519,10 @@ textarea::placeholder {
 
 .actions .primary {
   width: 100%;
-  min-height: 44px;
+  min-height: 48px;
   justify-content: center;
   padding-inline: 14px;
-  font-size: 14px;
+  font-size: 15px;
 }
 
 .actions .secondary {
@@ -2526,6 +2592,7 @@ textarea::placeholder {
   justify-content: flex-end;
 }
 
+.records,
 .run-summary,
 .live-result,
 .live-runbook,
@@ -2536,6 +2603,51 @@ textarea::placeholder {
   padding: 13px;
   border: 1px solid var(--line);
   background: var(--paper);
+}
+
+.records {
+  min-height: 360px;
+  align-content: start;
+  gap: 10px;
+  box-shadow: var(--shadow);
+}
+
+.records-empty {
+  display: grid;
+  gap: 5px;
+  padding: 14px;
+  border: 1px dashed color-mix(in oklch, var(--line), transparent 8%);
+  background: color-mix(in oklch, var(--paper-2), var(--paper) 70%);
+}
+
+.records-empty[hidden] {
+  display: none;
+}
+
+.records-empty strong,
+.records-empty span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.records-empty strong {
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.records-empty span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.38;
+}
+
+.records > .activity {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.records > .diagnostics-details {
+  display: block;
 }
 
 .summary-grid {
@@ -2894,6 +3006,18 @@ textarea::placeholder {
   font-weight: 800;
 }
 
+.setting-row .language-control {
+  flex: 0 0 auto;
+}
+
+.setting-row .language-control > span {
+  display: none;
+}
+
+.setting-row .language-control select {
+  min-width: 126px;
+}
+
 .activity {
   min-height: 120px;
   border-top: 1px solid var(--line);
@@ -2971,10 +3095,6 @@ textarea::placeholder {
 
   .workflow-rail li:last-child {
     border-bottom: 0;
-  }
-
-  .quick-steps {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .quick-steps li {

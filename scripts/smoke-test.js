@@ -58,6 +58,14 @@ const fixture = fs.readFileSync(path.join(root, "fixtures/live-x-smoke.md"), "ut
 const parsed = shared.parseMarkdown(fixture);
 const counts = shared.segmentCounts(parsed.segments);
 const plan = shared.buildPastePlan(parsed.segments);
+const remoteImageDraft = "Before\n\n![remote cover](https://images.example.test/path/cover.png)\n\nAfter";
+const remoteImageParsed = shared.parseMarkdown(remoteImageDraft);
+const failedRemoteImageMap = new Map(
+  remoteImageParsed.segments
+    .filter((segment) => segment.type === "image")
+    .map((segment) => [segment, { ok: false, permissionRequired: true, error: "Chrome permission required" }])
+);
+const remoteFallbackPlan = shared.buildPastePlan(remoteImageParsed.segments, failedRemoteImageMap);
 
 assert.equal(parsed.title, "xPoster live smoke test", "frontmatter title should parse");
 assert.ok(parsed.cover, "cover should parse");
@@ -67,6 +75,14 @@ assert.ok(counts.tweet >= 1, "fixture should include a tweet");
 assert.ok(counts.code >= 1, "fixture should include a code block");
 assert.ok(counts.divider >= 1, "fixture should include a divider");
 assert.ok(plan.html.includes("__XPOSTER_"), "paste plan should include replacement markers");
+assert.ok(
+  remoteFallbackPlan.plain.includes("![remote cover](https://images.example.test/path/cover.png)"),
+  "failed remote images should remain as Markdown image links"
+);
+assert.ok(
+  !remoteFallbackPlan.plain.includes("Chrome permission required"),
+  "failed remote image fallback should not write internal permission errors into the article"
+);
 
 const readText = (relativePath) => fs.readFileSync(path.join(root, relativePath), "utf8");
 const readme = readText("README.md");

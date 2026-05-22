@@ -89,15 +89,26 @@
   }
 
   function showStatus(text, level = "work", timeout = 0) {
-    let bar = document.getElementById(STATUS_ID);
-    if (!bar) {
-      bar = document.createElement("div");
-      bar.id = STATUS_ID;
-      document.body.appendChild(bar);
+    let card = document.getElementById(STATUS_ID);
+    if (!card) {
+      card = document.createElement("section");
+      card.id = STATUS_ID;
+      card.setAttribute("aria-live", "polite");
+      card.innerHTML = `
+        <div class="__xposter_status_head">
+          <span>xPoster</span>
+          <strong></strong>
+        </div>
+        <p></p>
+      `;
+      document.body.appendChild(card);
       injectStatusStyle();
     }
-    bar.dataset.level = level;
-    bar.textContent = text;
+    const title = card.querySelector("strong");
+    const detail = card.querySelector("p");
+    card.dataset.level = level;
+    if (title) title.textContent = statusTitleForLevel(level);
+    if (detail) detail.textContent = text;
     document.body.classList.add("__xposter_status_visible");
     broadcast({ type: "status", text, level });
     if (timeout) window.setTimeout(hideStatus, timeout);
@@ -109,34 +120,70 @@
     broadcast({ type: "status", text: "", level: "idle" });
   }
 
+  function statusTitleForLevel(level) {
+    if (level === "done") return "Article written";
+    if (level === "warn") return "Needs attention";
+    if (level === "error") return "Could not write";
+    return "Writing article";
+  }
+
   function injectStatusStyle() {
     if (document.getElementById("__xposter_status_style__")) return;
     const style = document.createElement("style");
     style.id = "__xposter_status_style__";
     style.textContent = `
-      body.__xposter_status_visible #react-root,
-      body.__xposter_status_visible > div:first-of-type {
-        padding-top: 42px !important;
-      }
       #${STATUS_ID} {
         position: fixed;
         z-index: 2147483647;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 42px;
+        top: 76px;
+        right: 18px;
+        width: min(340px, calc(100vw - 36px));
         display: grid;
-        place-items: center;
-        color: #fbfaf7;
-        font: 600 13px/1.2 ui-sans-serif, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif;
+        gap: 7px;
+        padding: 13px 14px 12px;
+        border: 1px solid #d8d2c6;
+        background: #fbfaf7;
+        color: #201f1b;
+        font: 13px/1.45 ui-sans-serif, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif;
         letter-spacing: 0;
-        box-shadow: 0 2px 14px rgba(32, 31, 27, 0.18);
+        box-shadow: 0 18px 46px rgba(32, 31, 27, 0.2);
         pointer-events: none;
       }
-      #${STATUS_ID}[data-level="work"] { background: #2f6f68; }
-      #${STATUS_ID}[data-level="warn"] { background: #a7552b; }
-      #${STATUS_ID}[data-level="done"] { background: #3f6f42; }
-      #${STATUS_ID}[data-level="error"] { background: #9d2f2f; }
+      #${STATUS_ID}::before {
+        content: "";
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 4px;
+        background: #2f6f68;
+      }
+      #${STATUS_ID}[data-level="warn"]::before { background: #a7552b; }
+      #${STATUS_ID}[data-level="done"]::before { background: #3f6f42; }
+      #${STATUS_ID}[data-level="error"]::before { background: #9d2f2f; }
+      #${STATUS_ID} .__xposter_status_head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      #${STATUS_ID} .__xposter_status_head span {
+        color: #6b665e;
+        font-size: 10px;
+        font-weight: 820;
+        text-transform: uppercase;
+      }
+      #${STATUS_ID} .__xposter_status_head strong {
+        color: #2f6f68;
+        font-size: 12px;
+        line-height: 1.2;
+      }
+      #${STATUS_ID}[data-level="warn"] .__xposter_status_head strong { color: #a7552b; }
+      #${STATUS_ID}[data-level="done"] .__xposter_status_head strong { color: #3f6f42; }
+      #${STATUS_ID}[data-level="error"] .__xposter_status_head strong { color: #9d2f2f; }
+      #${STATUS_ID} p {
+        margin: 0;
+        color: #4c4840;
+        overflow-wrap: anywhere;
+      }
     `;
     document.head.appendChild(style);
   }
@@ -249,25 +296,9 @@
       if (localImages.length) {
         await ensureVaultForLocalImages(localImages.length);
       }
-      const remoteImages = segments.filter((segment) => segment.type === "image" && isRemoteHttpImageSource(segment.source));
-      if (remoteImages.length) {
-        const permission = await verifyRemoteImagePermissions(remoteImages);
-        if (!permission.ok) {
-          const prefix = origin === "sidepanel"
-            ? ""
-            : `${remoteImages.length} web image(s) need xPoster side-panel image permission before direct paste or file import. Direct paste cannot open Chrome's permission prompt, but it can continue after the image website has already been allowed from the side panel. `;
-          throw new Error(`${prefix}${permission.error}`);
-        }
-      }
-
       const imageMap = await prepareImages(segments);
       const tableMap = await prepareTables(segments);
       const mediaFailures = collectMediaFailures(imageMap, "image").concat(collectMediaFailures(tableMap, "table"));
-      if (mediaFailures.length) {
-        const error = new Error(formatMediaFailureMessage(mediaFailures));
-        error.mediaFailures = mediaFailures;
-        throw error;
-      }
       const pastePlan = shared.buildPastePlan(segments, imageMap, tableMap);
       const filePayloads = streamImageFilesForMain(pastePlan);
       pastePlan.title = limitedParsed.title || null;
@@ -276,11 +307,6 @@
 
       showStatus("Writing into X editor...", "work");
       const mainSummary = await runMain(pastePlan, filePayloads);
-      if (mainSummary?.imgFail) {
-        const error = new Error(`${mainSummary.imgFail} image upload(s) failed in X. Review the placeholders in the article, then retry after running Check.`);
-        error.mainSummary = mainSummary;
-        throw error;
-      }
       const elapsedMs = Math.round(performance.now() - startedAt);
       const summary = {
         ok: true,
@@ -290,12 +316,14 @@
         dropped,
         images: summarizeMap(imageMap),
         tables: summarizeMap(tableMap),
+        mediaWarnings: summarizeMediaWarnings(mediaFailures),
+        mediaFailures,
         main: mainSummary,
         elapsedMs
       };
       state.lastSummary = summary;
       broadcast({ type: "complete", summary });
-      showStatus(`Imported in ${(elapsedMs / 1000).toFixed(1)}s`, "done", 5000);
+      showStatus(formatCompletionMessage(summary), mediaFailures.length || mainSummary?.imgFail ? "warn" : "done", 7000);
       return { ok: true, summary };
     } catch (error) {
       const message = error?.message || String(error);
@@ -448,46 +476,12 @@
     return last || { ok: false, error: "Image fetch failed", source };
   }
 
-  function remoteImageOriginsFromSegments(segments) {
-    return Array.from(
-      new Set(
-        segments
-          .map((segment) => imageOrigin(segment.source))
-          .filter(Boolean)
-      )
-    );
-  }
-
-  async function verifyRemoteImagePermissions(remoteImages) {
-    const origins = remoteImageOriginsFromSegments(remoteImages);
-    if (!origins.length) return { ok: true, origins: [] };
-    try {
-      const status = await chrome.runtime.sendMessage({
-        type: "xposter:remote-image-permission-status",
-        origins
-      });
-      if (status?.ok && !status.missing?.length) return { ok: true, origins, status };
-      return {
-        ok: false,
-        origins,
-        status,
-        error: remoteImagePermissionMessage((status?.missing || origins).join(", "))
-      };
-    } catch (error) {
-      return {
-        ok: false,
-        origins,
-        error: `Could not confirm remote image permission: ${error?.message || String(error)}`
-      };
-    }
-  }
-
   function isRetryableImageError(error) {
     return /fetch failed|timed out|timeout|network|HTTP 429|HTTP 500|HTTP 502|HTTP 503|HTTP 504/i.test(String(error || ""));
   }
 
   function remoteImagePermissionMessage(origin) {
-    return `Chrome has not granted image-site access for ${origin || "this image website"}. Open the xPoster side panel, click Allow image website, choose Allow in Chrome's prompt, then click Check downloads and Import again. This is a browser permission step, not an X upload failure; until it is allowed, Markdown image links cannot become uploaded images in X.`;
+    return `Chrome has not allowed xPoster to read images from ${origin || "this image website"} yet. The article can still be written; this image will stay as a Markdown image link until the site is allowed from the side panel.`;
   }
 
   async function loadImage(source, fallbackName) {
@@ -524,10 +518,6 @@
     } catch (error) {
       return { ok: false, error: error?.message || String(error), source };
     }
-  }
-
-  function isRemoteHttpImageSource(source) {
-    return /^https?:\/\//i.test(String(source || "").trim());
   }
 
   async function prepareTables(segments) {
@@ -576,19 +566,36 @@
     return failures;
   }
 
-  function formatMediaFailureMessage(failures) {
-    const first = failures[0];
-    const target = [first?.kind ? `${first.kind} ${first.index}` : null, first?.origin, first?.fileName]
-      .filter(Boolean)
-      .join(" / ");
-    const permissionFailure = failures.find((failure) => failure.permissionRequired);
-    if (permissionFailure) {
-      return remoteImagePermissionMessage(permissionFailure.origin || first?.origin);
+  function summarizeMediaWarnings(failures = []) {
+    const byKind = failures.reduce(
+      (summary, failure) => {
+        if (failure.kind === "table") summary.tables += 1;
+        else summary.images += 1;
+        if (failure.permissionRequired) summary.permissionRequired += 1;
+        return summary;
+      },
+      { images: 0, tables: 0, permissionRequired: 0 }
+    );
+    return {
+      total: failures.length,
+      ...byKind,
+      first: failures[0] || null
+    };
+  }
+
+  function formatCompletionMessage(summary) {
+    const warnings = summary?.mediaWarnings || {};
+    const uploadFailures = Number(summary?.main?.imgFail || 0);
+    const elapsed = summary?.elapsedMs ? ` in ${(summary.elapsedMs / 1000).toFixed(1)}s` : "";
+    const skippedImages = Number(warnings.images || 0) + uploadFailures;
+    const skippedTables = Number(warnings.tables || 0);
+    if (skippedImages || skippedTables) {
+      const parts = [];
+      if (skippedImages) parts.push(`${skippedImages} image(s) kept as Markdown links`);
+      if (skippedTables) parts.push(`${skippedTables} table(s) kept as Markdown`);
+      return `Article written${elapsed}. ${parts.join("; ")}.`;
     }
-    const remoteHint = failures.some((failure) => /^https?:\/\//i.test(String(failure?.source || "")))
-      ? " Remote Markdown images are already recognized, but xPoster stops before writing to X until every image file can be downloaded. If the failed URL is a signed COS link, open it in a normal tab; if it does not load there, regenerate a public image link and retry."
-      : "";
-    return `${failures.length} media item(s) could not be prepared before import. First failure${target ? ` (${target})` : ""}: ${first?.error || "unknown error"}.${remoteHint}`;
+    return `Article written${elapsed}.`;
   }
 
   function imageOrigin(source) {
@@ -833,17 +840,24 @@
 
   function installDragDrop() {
     document.addEventListener("dragenter", (event) => {
-      if (isXposterDropCandidate(event.dataTransfer) && isArticleRoute()) showDropHint();
+      if (isXposterDropCandidate(event.dataTransfer) && isArticleRoute()) showDropHint(event.dataTransfer);
+    }, true);
+    document.addEventListener("dragover", (event) => {
+      if (!isXposterDropCandidate(event.dataTransfer) || !isArticleRoute()) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+      showDropHint(event.dataTransfer);
     }, true);
     document.addEventListener("dragleave", (event) => {
-      if (hasFiles(event.dataTransfer)) hideDropHint();
+      if (hasFiles(event.dataTransfer) && isLeavingDocument(event)) hideDropHint();
     }, true);
     document.addEventListener("drop", async (event) => {
-      if (!hasFiles(event.dataTransfer) || !isArticleRoute()) return;
+      if (!isXposterDropCandidate(event.dataTransfer) || !isArticleRoute()) return;
       const files = Array.from(event.dataTransfer.files || []);
       const markdown = files.find(isMarkdownFile);
+      const markdownText = markdown ? "" : markdownTextFromTransfer(event.dataTransfer);
       const directoryItem = markdown ? null : findDirectoryTransferItem(event.dataTransfer);
-      if (!markdown && !directoryItem) {
+      if (!markdown && !markdownText && !directoryItem) {
         hideDropHint();
         return;
       }
@@ -852,6 +866,11 @@
       hideDropHint();
       if (markdown) {
         await importFile(markdown, "drop");
+        return;
+      }
+      if (markdownText) {
+        await ensureEditorReadyForFileImport();
+        await importMarkdown(markdownText, "drop");
         return;
       }
       try {
@@ -869,8 +888,24 @@
     }, true);
   }
 
+  function isLeavingDocument(event) {
+    const next = event.relatedTarget;
+    return !next || next === document.documentElement || next === document.body;
+  }
+
   function hasFiles(dataTransfer) {
     return Boolean(dataTransfer && Array.from(dataTransfer.types || []).includes("Files"));
+  }
+
+  function hasMarkdownText(dataTransfer) {
+    const types = Array.from(dataTransfer?.types || []);
+    if (!types.includes("text/plain")) return false;
+    return shared.looksLikeMarkdown(dataTransfer.getData("text/plain") || "");
+  }
+
+  function markdownTextFromTransfer(dataTransfer) {
+    const text = dataTransfer?.getData?.("text/plain") || "";
+    return shared.looksLikeMarkdown(text) ? text : "";
   }
 
   function isMarkdownFile(file) {
@@ -878,11 +913,18 @@
   }
 
   function isXposterDropCandidate(dataTransfer) {
+    if (hasMarkdownText(dataTransfer)) return true;
+    const types = Array.from(dataTransfer?.types || []);
+    if (types.includes("text/plain") || types.includes("text/markdown")) return true;
     if (!hasFiles(dataTransfer)) return false;
     const files = Array.from(dataTransfer.files || []);
     if (files.some(isMarkdownFile)) return true;
     const items = Array.from(dataTransfer.items || []);
-    return items.some(isDirectoryTransferItem);
+    return items.some(isLikelyMarkdownTransferItem) || items.some(isDirectoryTransferItem) || items.some((item) => item?.kind === "file");
+  }
+
+  function isLikelyMarkdownTransferItem(item) {
+    return item?.kind === "file" && /^(text\/markdown|text\/plain)$/i.test(item.type || "");
   }
 
   function isLikelyImageTransferItem(item) {
@@ -910,29 +952,128 @@
     }
   }
 
-  function showDropHint() {
-    if (document.getElementById(DROP_HINT_ID)) return;
-    const hint = document.createElement("div");
-    hint.id = DROP_HINT_ID;
-    hint.textContent = "Drop Markdown to import, or a folder to set local image folder";
-    hint.style.cssText = [
-      "position:fixed",
-      "right:18px",
-      "bottom:18px",
-      "z-index:2147483646",
-      "max-width:260px",
-      "padding:12px 14px",
-      "background:#fbfaf7",
-      "color:#201f1b",
-      "border:1px solid #d8d2c6",
-      "box-shadow:0 16px 40px rgba(32,31,27,.18)",
-      "font:600 13px/1.45 ui-sans-serif,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif"
-    ].join(";");
-    document.body.appendChild(hint);
+  function showDropHint(dataTransfer = null) {
+    const mode = dropHintMode(dataTransfer);
+    let hint = document.getElementById(DROP_HINT_ID);
+    if (!hint) {
+      hint = document.createElement("section");
+      hint.id = DROP_HINT_ID;
+      hint.setAttribute("aria-label", "xPoster drop tray");
+      hint.innerHTML = `
+        <div class="__xposter_drop_kicker">xPoster drop tray</div>
+        <strong></strong>
+        <p></p>
+        <div class="__xposter_drop_slots">
+          <span data-slot="markdown">Markdown</span>
+          <span data-slot="folder">Image folder</span>
+        </div>
+      `;
+      injectDropHintStyle();
+      document.body.appendChild(hint);
+    }
+    hint.dataset.mode = mode;
+    const title = hint.querySelector("strong");
+    const detail = hint.querySelector("p");
+    if (title) title.textContent = mode === "folder" ? "Drop image folder here" : "Drop Markdown here";
+    if (detail) {
+      detail.textContent =
+        mode === "folder"
+          ? "xPoster will remember this folder for local image paths. It will not import the article yet."
+          : "xPoster will create or use the open X Article, then show each import step.";
+    }
   }
 
   function hideDropHint() {
     document.getElementById(DROP_HINT_ID)?.remove();
+  }
+
+  function dropHintMode(dataTransfer) {
+    if (!dataTransfer) return "markdown";
+    if (hasMarkdownText(dataTransfer)) return "markdown";
+    const files = Array.from(dataTransfer.files || []);
+    if (files.some(isMarkdownFile)) return "markdown";
+    return findDirectoryTransferItem(dataTransfer) ? "folder" : "markdown";
+  }
+
+  function injectDropHintStyle() {
+    if (document.getElementById("__xposter_drop_hint_style__")) return;
+    const style = document.createElement("style");
+    style.id = "__xposter_drop_hint_style__";
+    style.textContent = `
+      #${DROP_HINT_ID} {
+        position: fixed;
+        z-index: 2147483646;
+        left: 50%;
+        top: 50%;
+        width: min(520px, calc(100vw - 44px));
+        min-height: 214px;
+        transform: translate(-50%, -50%);
+        display: grid;
+        align-content: center;
+        gap: 12px;
+        padding: 24px;
+        border: 2px solid #2f6f68;
+        background:
+          linear-gradient(135deg, rgba(47, 111, 104, 0.11), rgba(251, 250, 247, 0.96) 42%),
+          #fbfaf7;
+        color: #201f1b;
+        box-shadow: 0 28px 76px rgba(32, 31, 27, 0.28);
+        font: 14px/1.45 ui-sans-serif, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif;
+        letter-spacing: 0;
+        pointer-events: none;
+      }
+      #${DROP_HINT_ID}::before {
+        content: "";
+        position: absolute;
+        inset: 10px;
+        border: 1px dashed rgba(47, 111, 104, 0.46);
+      }
+      #${DROP_HINT_ID} .__xposter_drop_kicker {
+        position: relative;
+        color: #2f6f68;
+        font-size: 11px;
+        font-weight: 840;
+        text-transform: uppercase;
+      }
+      #${DROP_HINT_ID} strong {
+        position: relative;
+        max-width: 15rem;
+        font-size: 22px;
+        line-height: 1.05;
+      }
+      #${DROP_HINT_ID} p {
+        position: relative;
+        max-width: 28rem;
+        margin: 0;
+        color: #5d584f;
+        font-size: 13px;
+      }
+      #${DROP_HINT_ID} .__xposter_drop_slots {
+        position: relative;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        margin-top: 4px;
+      }
+      #${DROP_HINT_ID} .__xposter_drop_slots span {
+        min-height: 38px;
+        display: grid;
+        place-items: center;
+        border: 1px solid #d8d2c6;
+        background: rgba(255, 255, 255, 0.38);
+        color: #6b665e;
+        font-size: 11px;
+        font-weight: 820;
+        text-transform: uppercase;
+      }
+      #${DROP_HINT_ID}[data-mode="markdown"] [data-slot="markdown"],
+      #${DROP_HINT_ID}[data-mode="folder"] [data-slot="folder"] {
+        border-color: #2f6f68;
+        background: #2f6f68;
+        color: #f8fbf8;
+      }
+    `;
+    document.head.appendChild(style);
   }
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

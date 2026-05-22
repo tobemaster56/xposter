@@ -599,11 +599,11 @@
                 alt: segment.alt || ""
               },
               source: segment.source,
-              fallbackText: `[image upload failed: ${segment.alt || result.fileName || "image"}]`
+              fallbackText: imageFallbackMarkdown(segment)
             }
           });
         } else {
-          const fallback = `[image unavailable: ${segment.alt || guessFileName(segment.source, "image")}${result?.error ? ` - ${result.error}` : ""}]`;
+          const fallback = imageFallbackMarkdown(segment);
           html.push(`<p>${escapeHtml(fallback)}</p>`);
           addBlock("unstyled", fallback);
         }
@@ -639,6 +639,16 @@
 
     flushList();
     return { html: html.join(""), plain: blocksToPlainText(blocks), blocks, plan, markerPrefix: prefix };
+  }
+
+  function imageFallbackMarkdown(segment = {}) {
+    const rawAlt = String(segment.alt || guessFileName(segment.source, "image") || "image")
+      .replace(/[\]\r\n]+/g, " ")
+      .trim();
+    const alt = rawAlt || "image";
+    const source = String(segment.source || "").trim();
+    if (!source || source.startsWith("data:")) return `[image unavailable: ${alt}]`;
+    return `![${alt}](${source})`;
   }
 
   function renderInlineHtml(segment) {
