@@ -45,6 +45,8 @@ const requiredFiles = [
   "docs/privacy.md",
   "docs/privacy.zh-CN.md",
   "docs/images/buy-me-a-coffee-qr.png",
+  "vendor/canvas-confetti.browser.min.js",
+  "vendor/canvas-confetti.LICENSE",
   "assets/icon-16.png",
   "assets/icon-32.png",
   "assets/icon-48.png",
@@ -89,6 +91,10 @@ const frontmatterOnlyCoverDraft = [
   "Body without a repeated image."
 ].join("\n");
 const frontmatterOnlyCoverParsed = shared.parseMarkdown(frontmatterOnlyCoverDraft);
+const h1TitleDisabledParsed = shared.parseMarkdown("# Keep this heading\n\nBody text.", { setTitle: false });
+const coverDisabledParsed = shared.parseMarkdown("![cover](https://images.example.test/path/cover.png)\n\nBody text.", {
+  setCover: false
+});
 const coverOnlyPlan = shared.buildPastePlan(
   frontmatterOnlyCoverParsed.segments,
   new Map(),
@@ -105,6 +111,8 @@ const coverOnlyPlan = shared.buildPastePlan(
 );
 const contentScriptText = fs.readFileSync(path.join(root, "src/content.js"), "utf8");
 const sidepanelText = fs.readFileSync(path.join(root, "sidepanel.js"), "utf8");
+const sidepanelHtml = fs.readFileSync(path.join(root, "sidepanel.html"), "utf8");
+const sidepanelCss = fs.readFileSync(path.join(root, "sidepanel.css"), "utf8");
 const statusHelperStart = contentScriptText.indexOf("  function normalizeText");
 const statusHelperEnd = contentScriptText.indexOf("  function showStatus");
 const statusSandbox = {
@@ -121,6 +129,18 @@ vm.runInNewContext(
 
 assert.equal(parsed.title, "xPoster live smoke test", "frontmatter title should parse");
 assert.ok(parsed.cover, "cover should parse");
+assert.equal(h1TitleDisabledParsed.title, null, "title setting can disable title extraction");
+assert.equal(
+  h1TitleDisabledParsed.segments[0]?.kind,
+  "header-one",
+  "disabled title extraction should keep the first H1 in the body"
+);
+assert.equal(coverDisabledParsed.cover, null, "cover setting can disable cover extraction");
+assert.equal(
+  coverDisabledParsed.segments.filter((segment) => segment.type === "image").length,
+  1,
+  "disabled cover extraction should keep image blocks in the body"
+);
 assert.ok(counts.image >= 1, "fixture should include an image");
 assert.ok(counts.table >= 1, "fixture should include a table");
 assert.ok(counts.tweet >= 1, "fixture should include a tweet");
@@ -181,8 +201,102 @@ assert.ok(
   "side panel should report remote image host access from runtime permissions"
 );
 assert.ok(
-  sidepanelText.includes("remoteImageOriginsForMarkdowns(draftQueue.map((item) => item.markdown))"),
+  sidepanelText.includes("remoteImageOriginsForMarkdowns(draftQueue.map((item) => item.markdown), importOptions)"),
   "batch queue writes should request all remote image origins during the user action"
+);
+assert.ok(
+  sidepanelText.includes('options: importOptionsPayload()'),
+  "side panel import messages should include saved title and cover options"
+);
+assert.ok(
+  !sidepanelText.includes('record-icon-action is-disabled'),
+  "record history should not render a disabled open-link action when no URL is saved"
+);
+assert.ok(
+  sidepanelText.includes('class="record-file-name"'),
+  "record history should render source file names in their own metadata line"
+);
+assert.ok(
+  sidepanelHtml.includes('class="secondary compact danger record-clear-button"') &&
+    sidepanelHtml.indexOf('id="clearRecordHistory"') < sidepanelHtml.indexOf('id="recordHistoryList"'),
+  "record history should expose a contextual clear-all action above the list"
+);
+assert.ok(
+  !sidepanelHtml.includes('data-i18n="Clear saved record history from this browser."') &&
+    !sidepanelHtml.includes('data-i18n="Clear records">Clear records</button>'),
+  "settings should not duplicate the record clearing action"
+);
+assert.ok(
+  sidepanelText.includes("function showQueuedDraftAdded") &&
+    sidepanelText.includes("new draft") &&
+    sidepanelText.includes("total in queue"),
+  "queue feedback should explicitly tell users when drafts are added"
+);
+assert.ok(
+  sidepanelCss.includes("background: color-mix(in oklch, var(--paper), transparent 38%);") &&
+    sidepanelCss.includes('background: color-mix(in oklch, var(--paper), transparent 46%);') &&
+    sidepanelCss.includes("font-weight: 640;"),
+  "recognized draft summary should stay visually translucent"
+);
+assert.ok(
+  contentScriptText.includes("message.options || {}"),
+  "content script should apply title and cover options sent by the side panel"
+);
+assert.ok(
+  sidepanelHtml.includes("https://github.com/nevertoday/xposter"),
+  "settings should link to the GitHub project page"
+);
+assert.ok(
+  sidepanelHtml.includes("https://x.com/xiaoxiaodong01"),
+  "settings should link to the author X profile"
+);
+assert.ok(
+  sidepanelHtml.includes("vendor/canvas-confetti.browser.min.js"),
+  "side panel should load packaged canvas-confetti locally"
+);
+assert.ok(
+  sidepanelHtml.includes('id="draftDropTarget"') &&
+    sidepanelHtml.includes("Release anywhere in this panel to load or queue the draft."),
+  "side panel should expose a stable content-area Markdown drop target"
+);
+assert.ok(
+  sidepanelCss.includes(".draft-drop-target") &&
+    sidepanelCss.includes(".composer.drag-active .draft-drop-target") &&
+    !sidepanelCss.includes(".composer.drag-active::before") &&
+    !sidepanelCss.includes(".composer.drag-active::after"),
+  "drag feedback should use a real fixed drop layer instead of fragile pseudo-elements"
+);
+assert.ok(
+  sidepanelText.includes("const leftWindow = (event)") &&
+    !sidepanelText.includes("let dragDepth"),
+  "drop activation should not depend on fragile child-element drag depth"
+);
+assert.ok(
+  sidepanelHtml.includes('id="confettiOption"') &&
+    sidepanelHtml.includes('id="successSoundOption"') &&
+    sidepanelHtml.includes('id="successSoundStyle"') &&
+    sidepanelHtml.includes('id="successSoundVolume"') &&
+    sidepanelHtml.includes('id="testSuccessFeedback"'),
+  "settings should expose confetti, sound, sound style, volume, and feedback test controls"
+);
+assert.ok(
+  sidepanelText.includes("triggerSuccessFeedback(response.summary)") &&
+    sidepanelText.includes("lastSuccessFeedbackKey"),
+  "successful imports should trigger feedback once"
+);
+assert.ok(
+  sidepanelText.includes("window.confetti.create") &&
+    sidepanelText.includes("useWorker: false") &&
+    sidepanelText.includes("testSuccessFeedback"),
+  "confetti should run from a packaged local canvas without blob workers"
+);
+assert.ok(
+  sidepanelText.includes("AudioContext") &&
+    sidepanelText.includes("createOscillator") &&
+    sidepanelText.includes("SUCCESS_SOUND_STYLES") &&
+    sidepanelText.includes("successSoundNotes") &&
+    sidepanelText.includes("primeSuccessAudio();"),
+  "completion sound should use local Web Audio with user-selectable tones and prewarm on click"
 );
 assert.ok(
   coverOnlyPlan.plan.some(

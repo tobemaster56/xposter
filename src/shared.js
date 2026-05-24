@@ -63,10 +63,12 @@
     return { body: normalized.slice(match[0].length).trim(), meta };
   }
 
-  function parseMarkdown(markdown) {
+  function parseMarkdown(markdown, options = {}) {
+    const extractTitle = options.extractTitle !== false && options.setTitle !== false;
+    const extractCover = options.extractCover !== false && options.setCover !== false;
     const { body, meta } = parseFrontmatter(markdown);
     const titleFromMeta = meta.title || meta.Title || meta["标题"] || null;
-    let cover = meta.cover || meta.Cover || meta["封面"] || null;
+    let cover = extractCover ? meta.cover || meta.Cover || meta["封面"] || null : null;
     if (cover) {
       cover = cover
         .replace(/^!\[\[|\]\]$/g, "")
@@ -86,8 +88,8 @@
     }
     if (cursor < body.length) segments.push(...parseTextBlocks(body.slice(cursor)));
 
-    let title = titleFromMeta;
-    if (!title) {
+    let title = extractTitle ? titleFromMeta : null;
+    if (extractTitle && !title) {
       const titleIndex = segments.findIndex(
         (segment) => segment.type === "text" && segment.kind === "header-one"
       );
@@ -97,7 +99,7 @@
       }
     }
 
-    if (!cover) {
+    if (extractCover && !cover) {
       cover = segments.find((segment) => segment.type === "image" && segment.source)?.source || null;
     }
 
@@ -106,7 +108,7 @@
       cover,
       segments,
       meta,
-      titleFromMeta: Boolean(titleFromMeta)
+      titleFromMeta: Boolean(extractTitle && titleFromMeta)
     };
   }
 

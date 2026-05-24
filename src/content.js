@@ -39,6 +39,13 @@
     currentMarkdown: ""
   };
 
+  function normalizeImportOptions(options = {}) {
+    return {
+      setTitle: options.setTitle !== false,
+      setCover: options.setCover !== false
+    };
+  }
+
   function isArticleRoute() {
     return /^https:\/\/(?:x|twitter)\.com\/compose\/articles(?:$|[/?#])/.test(location.href);
   }
@@ -436,8 +443,9 @@
     });
   }
 
-  async function importMarkdown(markdown, origin = "manual") {
+  async function importMarkdown(markdown, origin = "manual", options = {}) {
     if (state.busy) return { ok: false, error: "Import already running" };
+    const importOptions = normalizeImportOptions(options);
     state.busy = true;
     state.currentMarkdown = markdown;
     const startedAt = performance.now();
@@ -447,7 +455,7 @@
       if (origin !== "paste" && !findEditor()) {
         await ensureEditorReadyForFileImport();
       }
-      const parsed = shared.parseMarkdown(markdown);
+      const parsed = shared.parseMarkdown(markdown, importOptions);
       const { segments, dropped } = shared.applyLimits(parsed.segments, DEFAULT_LIMITS);
       const limitedParsed = { ...parsed, segments };
       const counts = shared.segmentCounts(segments);
@@ -491,6 +499,7 @@
         ok: true,
         title: limitedParsed.title,
         cover: limitedParsed.cover,
+        importOptions,
         counts,
         dropped,
         images: summarizeMap(imageMap),
@@ -1645,12 +1654,12 @@
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === "xposter:import-markdown") {
-      importMarkdown(message.markdown || "", "sidepanel").then(sendResponse);
+      importMarkdown(message.markdown || "", "sidepanel", message.options || {}).then(sendResponse);
       return true;
     }
     if (message?.type === "xposter:analyze-markdown") {
       try {
-        const parsed = shared.parseMarkdown(message.markdown || "");
+        const parsed = shared.parseMarkdown(message.markdown || "", normalizeImportOptions(message.options || {}));
         sendResponse({ ok: true, parsed: { title: parsed.title, cover: parsed.cover, counts: shared.segmentCounts(parsed.segments) } });
       } catch (error) {
         sendResponse({ ok: false, error: error?.message || String(error) });

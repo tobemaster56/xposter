@@ -211,15 +211,23 @@ h2 {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  max-width: 148px;
-  min-height: 20px;
-  padding: 0;
+  max-width: 172px;
+  min-height: 26px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  background: transparent;
   color: var(--muted);
+  cursor: default;
   font-size: 10px;
   font-weight: 760;
   line-height: 1.15;
   text-align: right;
   overflow-wrap: anywhere;
+  transition:
+    background-color var(--motion-quick) ease,
+    border-color var(--motion-quick) ease,
+    color var(--motion-quick) ease,
+    transform var(--motion-quick) var(--ease-out-quart);
 }
 
 .page-state::before {
@@ -238,6 +246,25 @@ h2 {
 
 .page-state.warn {
   color: var(--warn);
+}
+
+.page-state.action {
+  border-color: color-mix(in oklch, var(--signal), var(--line) 52%);
+  background: color-mix(in oklch, var(--signal), var(--paper) 92%);
+  color: var(--signal-text);
+  cursor: pointer;
+}
+
+.page-state.action:hover {
+  background: color-mix(in oklch, var(--signal), var(--paper) 86%);
+}
+
+.page-state.action:active {
+  transform: translateY(1px) scale(0.985);
+}
+
+.page-state:disabled:not(.action) {
+  cursor: default;
 }
 
 .quick-steps-panel {
@@ -850,11 +877,14 @@ h2 {
 .tabs {
   --tab-count: 3;
   --tab-index: 0;
+  position: sticky;
+  top: 0;
+  z-index: 30;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  position: relative;
   border: 1px solid var(--line);
   background: color-mix(in oklch, var(--paper-2), var(--paper) 72%);
+  box-shadow: 0 1px 0 color-mix(in oklch, var(--line), transparent 38%);
 }
 
 .tabs::after {
@@ -969,50 +999,46 @@ h2 {
   transform: none;
 }
 
-.composer.drag-active::before,
-.composer.drag-active::after {
+.draft-drop-target {
   position: absolute;
+  inset: 48px 12px 62px;
+  z-index: 14;
+  display: none;
+  place-content: center;
+  justify-items: center;
+  gap: 8px;
+  padding: 22px;
   pointer-events: none;
-}
-
-.composer.drag-active::before {
-  content: "";
-  inset: 10px 12px 62px;
-  z-index: 2;
   border: 1px dashed color-mix(in oklch, var(--ink), transparent 72%);
   border-radius: 7px;
   background:
     linear-gradient(180deg, color-mix(in oklch, var(--paper), transparent 6%), color-mix(in oklch, var(--paper-2), transparent 10%)),
     color-mix(in oklch, var(--paper), transparent 10%);
+  color: var(--ink);
+  text-align: center;
   transform-origin: 50% 50%;
   animation:
     xposter-drop-field-in 220ms var(--ease-out-quint) both,
     xposter-drop-breathe 1.8s ease-in-out infinite;
 }
 
-.composer.drag-active::after {
-  content: attr(data-drop-label) " · " attr(data-drop-hint);
-  left: 50%;
-  right: auto;
-  bottom: 76px;
-  z-index: 3;
-  display: block;
-  width: max-content;
-  max-width: calc(100% - 36px);
-  min-height: 34px;
-  padding: 8px 12px;
-  border: 1px solid color-mix(in oklch, var(--ink), transparent 84%);
-  border-radius: 7px;
-  background: color-mix(in oklch, var(--paper), transparent 2%);
+.composer.drag-active .draft-drop-target {
+  display: grid;
+}
+
+.draft-drop-target strong {
   color: var(--ink);
-  box-shadow: 0 10px 26px color-mix(in oklch, var(--ink), transparent 92%);
+  font-size: 14px;
+  font-weight: 780;
+  line-height: 1.2;
+}
+
+.draft-drop-target span {
+  max-width: 26rem;
+  color: color-mix(in oklch, var(--muted), var(--ink) 8%);
   font-size: 12px;
-  font-weight: 680;
-  line-height: 1.45;
-  text-align: center;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  font-weight: 560;
+  line-height: 1.4;
   text-transform: none;
   animation: xposter-drop-copy-in 240ms var(--ease-out-quint) both;
 }
@@ -1081,13 +1107,81 @@ h2 {
 }
 
 .drop-status[data-tone="error"] {
-  background: color-mix(in oklch, var(--danger), var(--paper) 91%);
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 10px;
+  align-items: center;
+  margin: 0 12px 10px;
+  padding: 10px 10px 10px 12px;
+  border: 1px solid color-mix(in oklch, var(--danger), var(--line) 58%);
+  border-left-width: 3px;
+  background: color-mix(in oklch, var(--danger), var(--paper) 94%);
   color: var(--danger);
-  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--danger), transparent 76%);
+  box-shadow: none;
+}
+
+.drop-status[data-tone="error"] strong,
+.drop-status[data-tone="error"] span {
+  grid-column: 1;
+}
+
+.drop-status[data-tone="error"] strong {
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.drop-status[data-tone="error"] strong::after {
+  content: "";
+  margin-left: 0;
+}
+
+.drop-status[data-tone="error"] span {
+  margin-top: 1px;
+  color: color-mix(in oklch, var(--danger), var(--muted) 42%);
+  font-size: 11px;
+  line-height: 1.35;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.drop-status-dismiss {
+  grid-column: 2;
+  grid-row: 1 / 3;
+  align-self: start;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  background: transparent;
+  color: color-mix(in oklch, var(--danger), var(--ink) 16%);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-quick) ease,
+    border-color var(--motion-quick) ease,
+    transform var(--motion-quick) var(--ease-out-quart);
+}
+
+.drop-status-dismiss:hover {
+  border-color: color-mix(in oklch, var(--danger), var(--line) 60%);
+  background: color-mix(in oklch, var(--danger), var(--paper) 88%);
+}
+
+.drop-status-dismiss:active {
+  transform: translateY(1px) scale(0.96);
+}
+
+.drop-status-dismiss svg {
+  width: 15px;
+  height: 15px;
+  fill: currentColor;
+}
+
+.composer[data-empty-draft="true"] .drop-status[data-tone="idle"] {
+  display: none;
 }
 
 :root[data-theme="dark"] .drop-status,
-:root[data-theme="dark"] .draft-brief,
 :root[data-theme="dark"] .draft-queue-item,
 :root[data-theme="dark"] .draft-queue-empty,
 :root[data-theme="dark"] .record-history-item,
@@ -1104,6 +1198,11 @@ h2 {
 :root[data-theme="dark"] .record-history-item:hover,
 :root[data-theme="dark"] .draft-queue-item[data-active="true"] {
   background: #1a2833;
+}
+
+:root[data-theme="dark"] .drop-status[data-tone="error"] {
+  border-color: color-mix(in oklch, var(--danger), var(--line) 54%);
+  background: color-mix(in oklch, var(--danger), #17232d 84%);
 }
 
 .draft-queue {
@@ -1422,16 +1521,26 @@ h2 {
   gap: 2px;
   min-height: 36px;
   padding: 7px 12px 8px;
-  border-bottom: 1px solid color-mix(in oklch, var(--line), transparent 54%);
-  background: color-mix(in oklch, var(--paper), var(--paper-2) 8%);
-  color: var(--muted);
+  border-bottom: 1px solid color-mix(in oklch, var(--line), transparent 72%);
+  background: color-mix(in oklch, var(--paper), transparent 38%);
+  color: color-mix(in oklch, var(--muted), transparent 16%);
   font-size: 11px;
   line-height: 1.35;
 }
 
 .draft-brief[data-tone="ready"] {
-  color: var(--ink);
-  background: color-mix(in oklch, var(--paper), var(--signal) 4%);
+  color: color-mix(in oklch, var(--ink), transparent 28%);
+  background: color-mix(in oklch, var(--paper), transparent 46%);
+}
+
+:root[data-theme="dark"] .draft-brief {
+  border-bottom-color: color-mix(in oklch, var(--line), transparent 68%);
+  background: color-mix(in oklch, #17232d, transparent 34%);
+}
+
+:root[data-theme="dark"] .draft-brief[data-tone="ready"] {
+  color: color-mix(in oklch, var(--ink), transparent 24%);
+  background: color-mix(in oklch, #17232d, transparent 42%);
 }
 
 .draft-brief span {
@@ -1442,11 +1551,11 @@ h2 {
 }
 
 .draft-brief #draftRecognized {
-  font-weight: 760;
+  font-weight: 640;
 }
 
 .draft-brief #draftTargetState {
-  color: var(--muted);
+  color: color-mix(in oklch, var(--muted), transparent 20%);
 }
 
 #markdown {
@@ -1457,6 +1566,11 @@ h2 {
   border-bottom: 1px solid color-mix(in oklch, var(--line), transparent 38%);
   background: color-mix(in oklch, var(--paper), var(--paper-2) 9%);
   resize: none;
+}
+
+#markdown:hover {
+  border-bottom-color: color-mix(in oklch, var(--ink), var(--line) 82%);
+  background: color-mix(in oklch, var(--paper), var(--paper-2) 13%);
 }
 
 textarea {
@@ -1497,6 +1611,15 @@ summary:focus-visible,
 textarea:focus-visible,
 .record-search input:focus-visible {
   box-shadow: inset 0 0 0 2px color-mix(in oklch, var(--signal), transparent 66%);
+}
+
+#markdown:focus-visible {
+  outline: 1px solid color-mix(in oklch, var(--ink), transparent 78%);
+  outline-offset: -1px;
+  background: color-mix(in oklch, var(--paper), var(--paper-2) 15%);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklch, var(--ink), transparent 84%),
+    inset 0 1px 0 color-mix(in oklch, var(--paper), var(--ink) 4%);
 }
 
 .preview {
@@ -2597,15 +2720,15 @@ textarea:focus-visible,
 @keyframes xposter-draft-ack {
   0% {
     background-color: transparent;
-    box-shadow: inset 0 0 0 0 color-mix(in oklch, var(--signal), transparent 100%);
+    box-shadow: inset 0 0 0 0 color-mix(in oklch, var(--ink), transparent 100%);
   }
   18% {
-    background-color: color-mix(in oklch, var(--signal), transparent 94%);
-    box-shadow: inset 0 0 0 2px color-mix(in oklch, var(--signal), transparent 68%);
+    background-color: color-mix(in oklch, var(--paper-2), var(--paper) 34%);
+    box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--ink), transparent 84%);
   }
   100% {
     background-color: transparent;
-    box-shadow: inset 0 0 0 0 color-mix(in oklch, var(--signal), transparent 100%);
+    box-shadow: inset 0 0 0 0 color-mix(in oklch, var(--ink), transparent 100%);
   }
 }
 
@@ -2619,8 +2742,7 @@ textarea:focus-visible,
     transition-duration: 0.01ms !important;
   }
 
-  .composer.drag-active::after,
-  .composer.drag-active::before,
+  .composer.drag-active .draft-drop-target,
   .record-edit-dialog,
   .record-edit-sheet,
   .inline-write-status[data-tone="work"],
@@ -3150,7 +3272,7 @@ textarea:focus-visible,
 
 .record-search {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 6px 8px;
   align-items: center;
   padding: 0 0 2px;
@@ -3171,6 +3293,12 @@ textarea:focus-visible,
   padding: 8px 13px;
 }
 
+.record-clear-button {
+  min-height: 34px;
+  padding-inline: 10px;
+  white-space: nowrap;
+}
+
 .record-search input:focus {
   border-color: var(--ink);
   box-shadow: inset 0 0 0 1px var(--ink);
@@ -3188,11 +3316,11 @@ textarea:focus-visible,
 
 .record-history-list {
   display: grid;
-  gap: 0;
+  gap: 8px;
   margin: 0;
   padding: 0;
-  border: 1px solid color-mix(in oklch, var(--line), transparent 18%);
-  background: var(--paper);
+  border: 0;
+  background: transparent;
   list-style: none;
 }
 
@@ -3208,22 +3336,25 @@ textarea:focus-visible,
 }
 
 .record-history-list > .record-history-empty {
-  border: 0;
+  border: 1px dashed color-mix(in oklch, var(--line), transparent 10%);
 }
 
 .record-history-item {
-  border-bottom: 1px solid color-mix(in oklch, var(--line), transparent 28%);
-  background: var(--paper);
+  border: 1px solid color-mix(in oklch, var(--line), transparent 26%);
+  background: color-mix(in oklch, var(--paper), var(--paper-2) 18%);
   cursor: pointer;
-  transition: background-color var(--motion-quick) ease;
+  transition:
+    background-color var(--motion-quick) ease,
+    border-color var(--motion-quick) ease;
 }
 
 .record-history-item:hover {
-  background: color-mix(in oklch, var(--signal), var(--paper) 96%);
+  border-color: color-mix(in oklch, var(--line), var(--ink) 16%);
+  background: color-mix(in oklch, var(--paper-2), var(--paper) 74%);
 }
 
 .record-history-item:last-child {
-  border-bottom: 0;
+  border-bottom: 1px solid color-mix(in oklch, var(--line), transparent 26%);
 }
 
 .record-history-item:focus-visible {
@@ -3233,8 +3364,8 @@ textarea:focus-visible,
 
 .record-draft-card {
   display: grid;
-  gap: 7px;
-  padding: 11px 12px 10px;
+  gap: 9px;
+  padding: 12px 13px 11px;
 }
 
 .record-draft-head {
@@ -3253,11 +3384,13 @@ textarea:focus-visible,
   align-items: center;
   justify-content: center;
   min-height: 22px;
-  max-width: 72px;
-  padding: 3px 0;
-  color: var(--muted);
+  max-width: 88px;
+  padding: 3px 7px;
+  border: 1px solid color-mix(in oklch, var(--line), transparent 28%);
+  background: color-mix(in oklch, var(--paper-2), var(--paper) 66%);
+  color: color-mix(in oklch, var(--muted), var(--ink) 12%);
   font-size: 10px;
-  font-weight: 760;
+  font-weight: 680;
   line-height: 1.2;
   text-align: center;
   overflow: hidden;
@@ -3267,15 +3400,26 @@ textarea:focus-visible,
 
 .record-title {
   display: grid;
-  gap: 2px;
+  gap: 3px;
   min-width: 0;
 }
 
 .record-title strong {
   color: var(--ink);
   font-size: 13.5px;
-  font-weight: 820;
+  font-weight: 760;
   line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.record-file-name {
+  min-width: 0;
+  color: color-mix(in oklch, var(--muted), var(--ink) 4%);
+  font-size: 11px;
+  font-weight: 640;
+  line-height: 1.25;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3283,10 +3427,10 @@ textarea:focus-visible,
 
 .record-title em {
   min-width: 0;
-  color: var(--muted);
-  font-size: 11px;
+  color: color-mix(in oklch, var(--muted), transparent 4%);
+  font-size: 10.5px;
   font-style: normal;
-  font-weight: 620;
+  font-weight: 560;
   line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3297,9 +3441,9 @@ textarea:focus-visible,
   display: -webkit-box;
   margin: 0;
   padding: 0;
-  color: color-mix(in oklch, var(--ink), var(--muted) 18%);
+  color: color-mix(in oklch, var(--ink), var(--muted) 28%);
   font-size: 12px;
-  line-height: 1.36;
+  line-height: 1.42;
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -3316,9 +3460,9 @@ textarea:focus-visible,
 .record-summary span {
   min-width: 0;
   padding: 2px 0;
-  color: var(--muted);
+  color: color-mix(in oklch, var(--muted), transparent 4%);
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 640;
   line-height: 1.2;
   overflow-wrap: anywhere;
 }
@@ -3375,11 +3519,11 @@ textarea:focus-visible,
   align-items: center;
   gap: 6px;
   padding: 0 11px;
-  border: 1px solid color-mix(in oklch, var(--line), transparent 8%);
-  background: color-mix(in oklch, var(--paper-2), var(--paper) 72%);
+  border: 1px solid color-mix(in oklch, var(--ink), var(--line) 72%);
+  background: color-mix(in oklch, var(--paper), var(--paper-2) 28%);
   color: var(--ink);
   font-size: 11.5px;
-  font-weight: 820;
+  font-weight: 760;
   white-space: nowrap;
 }
 
@@ -3395,7 +3539,7 @@ textarea:focus-visible,
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  opacity: .82;
+  opacity: .66;
   transition: opacity var(--motion-quick) ease;
 }
 
@@ -3408,7 +3552,7 @@ textarea:focus-visible,
   height: 28px;
   display: inline-grid;
   place-items: center;
-  color: var(--muted);
+  color: color-mix(in oklch, var(--muted), transparent 4%);
   text-decoration: none;
 }
 
@@ -3420,7 +3564,7 @@ textarea:focus-visible,
 
 .record-use-button:hover,
 .record-icon-action:hover {
-  background: color-mix(in oklch, var(--ink), var(--paper) 88%);
+  background: color-mix(in oklch, var(--ink), var(--paper) 92%);
   color: var(--ink);
 }
 
@@ -3443,16 +3587,6 @@ textarea:focus-visible,
 .record-use-button:active,
 .record-icon-action:active {
   transform: translateY(1px) scale(0.98);
-}
-
-.record-icon-action.is-disabled {
-  cursor: default;
-  opacity: .42;
-}
-
-.record-icon-action.is-disabled:hover {
-  background: transparent;
-  color: var(--muted);
 }
 
 .record-edit-sheet {
@@ -3920,6 +4054,11 @@ textarea:focus-visible,
   border-top: 1px solid var(--line);
 }
 
+.setting-row-stack {
+  align-items: stretch;
+  flex-direction: column;
+}
+
 .setting-row:first-of-type {
   margin-top: 8px;
 }
@@ -4015,6 +4154,167 @@ textarea:focus-visible,
 
 .theme-control label:active span {
   transform: translateY(1px) scale(0.985);
+}
+
+.setting-checks {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.setting-checks label {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  background: color-mix(in oklch, var(--paper-2), var(--paper) 48%);
+  cursor: pointer;
+  transition:
+    border-color var(--motion-quick) ease,
+    background-color var(--motion-quick) ease,
+    transform var(--motion-quick) var(--ease-out-quart);
+}
+
+.setting-checks label:hover {
+  border-color: color-mix(in oklch, var(--signal), var(--line) 65%);
+  background: var(--paper);
+}
+
+.setting-checks label:active {
+  transform: translateY(1px);
+}
+
+.setting-checks input {
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: var(--signal);
+}
+
+.setting-checks span,
+.setting-checks strong,
+.setting-checks em {
+  min-width: 0;
+}
+
+.setting-checks span {
+  margin: 0;
+}
+
+.setting-checks strong {
+  margin: 0;
+  color: var(--ink);
+  font-size: 12.5px;
+  line-height: 1.25;
+}
+
+.setting-checks em {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-style: normal;
+  line-height: 1.35;
+}
+
+.setting-subcontrols {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(112px, .7fr) auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.setting-subcontrols label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.setting-subcontrols label > span {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 720;
+  line-height: 1.2;
+}
+
+.setting-subcontrols select,
+.setting-subcontrols input[type="range"] {
+  width: 100%;
+  min-width: 0;
+}
+
+.setting-subcontrols input[type="range"] {
+  accent-color: var(--signal);
+}
+
+.setting-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.setting-link {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in oklch, var(--line), transparent 8%);
+  background: color-mix(in oklch, var(--paper-2), var(--paper) 58%);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 760;
+  line-height: 1;
+  text-decoration: none;
+  transition:
+    background-color var(--motion-quick) ease,
+    border-color var(--motion-quick) ease,
+    color var(--motion-quick) ease,
+    transform var(--motion-quick) var(--ease-out-quart);
+}
+
+.setting-link:hover {
+  border-color: color-mix(in oklch, var(--ink), var(--line) 62%);
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.setting-link:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--signal), transparent 24%);
+  outline-offset: 2px;
+}
+
+.setting-link:active {
+  transform: translateY(1px) scale(0.985);
+}
+
+.setting-link svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  fill: currentColor;
+}
+
+.setting-link span {
+  margin: 0;
+  color: currentColor;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+}
+
+.success-confetti-canvas {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
 }
 
 .activity {
@@ -4151,6 +4451,14 @@ textarea:focus-visible,
     grid-template-columns: 1fr;
     align-items: start;
     gap: 3px;
+  }
+
+  .drop-status[data-tone="error"] {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .setting-subcontrols {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .drop-status strong::after {
@@ -4412,6 +4720,7 @@ textarea:focus-visible,
   .record-search input,
   .record-use-button,
   .record-icon-action,
+  .drop-status-dismiss,
   .theme-control span {
     min-height: 44px;
   }

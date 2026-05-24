@@ -118,6 +118,8 @@
     liveRunbookList: document.getElementById("liveRunbookList"),
     focusRunbook: document.getElementById("focusRunbook"),
     draftDropStatus: document.getElementById("draftDropStatus"),
+    draftDropTarget: document.getElementById("draftDropTarget"),
+    draftDropDismiss: document.getElementById("draftDropDismiss"),
     proofDeckMeta: document.getElementById("proofDeckMeta"),
     proofDeckList: document.getElementById("proofDeckList"),
     completionAuditMeta: document.getElementById("completionAuditMeta"),
@@ -139,8 +141,16 @@
     downloadEvidencePackage: document.getElementById("downloadEvidencePackage"),
     languageSelect: document.getElementById("languageSelect"),
     themeChoice: document.getElementById("themeChoice"),
+    metadataOptions: document.getElementById("metadataOptions"),
+    importTitleOption: document.getElementById("importTitleOption"),
+    importCoverOption: document.getElementById("importCoverOption"),
+    successFeedbackOptions: document.getElementById("successFeedbackOptions"),
+    confettiOption: document.getElementById("confettiOption"),
+    successSoundOption: document.getElementById("successSoundOption"),
+    successSoundStyle: document.getElementById("successSoundStyle"),
+    successSoundVolume: document.getElementById("successSoundVolume"),
+    testSuccessFeedback: document.getElementById("testSuccessFeedback"),
     extensionVersion: document.getElementById("extensionVersion"),
-    settingsVersion: document.getElementById("settingsVersion"),
     activityPanel: document.getElementById("activityPanel")
   };
 
@@ -148,6 +158,8 @@
   const STORAGE_LIVE_RESULT = "xposter_live_result_checks";
   const STORAGE_LANGUAGE = "xposter_language";
   const STORAGE_THEME = "xposter_theme";
+  const STORAGE_IMPORT_OPTIONS = "xposter_import_options";
+  const STORAGE_SUCCESS_FEEDBACK = "xposter_success_feedback";
   const STORAGE_RECORD_HISTORY = "xposter_publish_record_history";
   const STORAGE_DRAFT_QUEUE = "xposter_publish_queue";
   const MAX_RECORD_HISTORY = 30;
@@ -156,6 +168,8 @@
   const MAX_DRAFT_QUEUE_ITEM_BYTES = 512 * 1024;
   const MAX_RECORD_MARKDOWN_CHARS = 120000;
   const THEME_MODES = new Set(["system", "light", "dark"]);
+  const SUCCESS_SOUND_STYLES = new Set(["soft", "bell", "pop"]);
+  const SUCCESS_CONFETTI_COLORS = ["#0f1419", "#536471", "#1d9bf0", "#00ba7c", "#cfd9de"];
   const EXTENSION_VERSION =
     typeof chrome !== "undefined" && chrome.runtime?.getManifest
       ? chrome.runtime.getManifest().version
@@ -164,7 +178,6 @@
   const EXTENSION_PATH = "the folder you cloned or downloaded";
 
   if (els.extensionVersion) els.extensionVersion.textContent = `v${EXTENSION_VERSION}`;
-  if (els.settingsVersion) els.settingsVersion.textContent = `v${EXTENSION_VERSION}`;
   const LIVE_SMOKE_FIXTURE = `---
 title: xPoster live smoke test
 cover: data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAACqUlEQVR4nO3ZMXLUQBRF0dmHA7wDb4uMXXoBRN4JVRBAOXBiPFhC6n6/9Y+qbt6td2YS3W4ez8jn188fv3Ws9IabnvRL6lh6c6MXyvCaAyF9QYUQpC+lIIT0RRREkL6AggjSB1cQQfrACiNIH1ZBAOmDKoggfUCFEaQPpyCA9MEURpA+lABQCkD6QAojSB9GAAgAXR7A45eH+MU1GcDr6PdKv4TOxceHIN9QAFvGhwAAAAAA4HIA9owPAQAAAAAAAAVeSLcAaB4AzSsF4OX7c8sAaA4gCQGAYgHQPAAEQOf8AzQPgMbNHh+AIiWGLwkg+SK6BkDzAGgeAM0DoHkANA+A5gHQPACaB0DzAGgeAM0DoHmlAKS/yq32JQ+AQqWHBKBA6TEBAACAdOlBATA+AAAAYHwADL8cgPTL6BgAk3v69jV+BgACo98rfTYAQsNXgQBAgfGTCAAAAIAK46cQAAAAAAAAUGL8BAIAAAAAAAAAqAAg/WXvjK97ACwOYA+Ej8YaAWAkCgB2IvhsuLMAzPqHAGAjgDOGPTsAJiFIDz0SAQAb/gHSIwPg1z8MAQAL//oBGDg8AAEAI85xpPSwMxAAcAEER+4HAAAAAADAsgiO3g0AAABYFcEZ9wJgUQRn3QmABRGceR8AFkNw9l0AWAjBiHsAsAiCUXcAYAEEI88PQHEEo88+DMBeBOkRKyKYcW4AiiKYdWYACiKYed6hALYiSI9WCcHss97enhSC9FiVEMTGHw3gPYb0OBURJM4XAdCxasMDEMaQPgMAAkDvAEDQq7/GB6BXADTvQwAQ9Oju+AD06J8AILh2n44PwXXbPD4A12wXAAiu1e7xIbhO/z0+BOt3eHwI1u208UFYqyHDQ7BGw8cHoWZTh4ehRunNNz3pl3SFRu7zB/oxkFuyiUIVAAAAAElFTkSuQmCC
@@ -273,6 +286,11 @@ console.log("示例代码块");
   let suppressNextTypedHistory = false;
   let activeWriteQueueItemId = null;
   let batchWriting = false;
+  let importOptions = { setTitle: true, setCover: true };
+  let successFeedbackOptions = { confetti: true, sound: true, soundStyle: "soft", volume: 0.55 };
+  let successAudioContext = null;
+  let successConfetti = null;
+  let lastSuccessFeedbackKey = "";
   let remoteImageAccessStatus = { origins: [], available: [], missing: [], checkedAt: null };
   let remoteImageProbeStatus = { state: "idle", total: 0, ok: 0, fail: 0, results: [], checkedAt: null };
 
@@ -293,6 +311,7 @@ console.log("示例代码块");
       "Paste a draft, open the article, then import. xPoster never publishes for you.": "粘贴草稿，打开文章，然后导入。xPoster 不会替你发布。",
       Checking: "检查中",
       "Checking X": "正在识别 X",
+      "Open X Articles entry": "打开 X 文章入口",
       "Not on X": "未在 X 页面",
       "Refresh X": "刷新 X 页面",
       "Old importer active": "旧脚本仍在运行",
@@ -468,6 +487,7 @@ console.log("示例代码块");
       "Use Preview to see what xPoster found. Imported images appear in X after Allow image website, Check downloads, and Import.": "在预览里查看 xPoster 识别到的内容。写入时，能下载的网页图片会上传到 X；失败的图片会保留链接。",
       "If image links still look like Markdown here, that is normal. xPoster converts them during Import, not inside this text box.": "如果图片链接在这里仍然像 Markdown 语法，这是正常的。xPoster 会在导入时转换它们，不会在这个输入框里转换。",
       "Drop Markdown here": "拖拽上传",
+      "Release anywhere in this panel to load or queue the draft.": "在这个区域任意位置松开，即可载入或加入待发布队列。",
       "Release to load it into the article draft": "松开后加入待发布草稿",
       "Release to load Markdown": "松开即可载入 Markdown",
       "Release to load": "松开载入",
@@ -584,6 +604,7 @@ console.log("示例代码块");
       Records: "记录",
       Settings: "设置",
       "Search records": "搜索记录",
+      "Clear all": "全部清空",
       "Draft recovery": "找回草稿",
       "Find previous text": "找回上次输入",
       "Find the Markdown you used before, copy it, or edit it before writing.": "找回之前输入的 Markdown，复制或编辑后再写入。",
@@ -620,6 +641,30 @@ console.log("示例代码块");
       "Choose the folder that contains relative image paths in your Markdown.": "选择包含 Markdown 相对图片路径的文件夹。",
       "Title and cover": "标题和封面",
       "xPoster sets them automatically when the X Article editor allows it.": "当 X 文章编辑器允许时，xPoster 会自动设置它们。",
+      "Choose what xPoster writes into X Article metadata.": "选择 xPoster 要写入 X 文章元信息的内容。",
+      "Set article title": "设置文章标题",
+      "Use frontmatter title or the first H1.": "使用 frontmatter title 或第一个一级标题。",
+      "Set article cover": "设置文章封面",
+      "Use frontmatter cover or the first image.": "使用 frontmatter cover 或第一张图片。",
+      "Success feedback": "成功反馈",
+      "Choose the small celebration shown after a successful write.": "选择写入成功后显示的小反馈。",
+      "Celebration animation": "庆祝动画",
+      "Show a brief confetti burst when X reports a completed write.": "当 X 返回写入完成时，显示一次短暂彩纸动画。",
+      "Completion sound": "完成音效",
+      "Play a short local chime after a successful write.": "写入成功后播放一声本地短提示音。",
+      "Sound style": "音效风格",
+      "Soft chime": "轻柔提示",
+      "Warm bell": "温和铃声",
+      "Light pop": "轻快弹响",
+      "Volume": "音量",
+      "Test feedback": "测试反馈",
+      "Feedback test": "反馈测试",
+      "Use this to confirm animation and sound work in this Chrome profile.": "用它确认当前 Chrome 配置里的动画和音效是否可用。",
+      "Project and author": "项目与作者",
+      "Open the project page or follow updates from the author.": "打开项目页面，或关注作者更新。",
+      "Open GitHub project": "打开 GitHub 项目",
+      "GitHub project": "GitHub 项目",
+      "Follow author on X": "在 X 关注作者",
       "Embeds and code": "嵌入和代码",
       "X TARGET": "X 文章",
       "Workspace sections": "工作区",
@@ -697,6 +742,7 @@ console.log("示例代码块");
       "Edit": "编辑",
       "Open": "打开",
       "Clear records": "清空记录",
+      "Clear all": "全部清空",
       "Clear saved record history from this browser.": "清空保存在这个浏览器里的记录历史。",
       "Close": "关闭",
       "Edit saved Markdown": "编辑已保存的 Markdown",
@@ -734,6 +780,7 @@ console.log("示例代码块");
       "No records yet.": "还没有记录。",
       "Write or check an article to create the first record.": "载入 Markdown、检查或写入文章后会生成第一条记录。",
       "Load Markdown, run Check, or Write article to create the first record.": "载入 Markdown、运行检查或写入文章后会生成第一条记录。",
+      "All saved drafts cleared.": "已清空所有保存的草稿。",
       "Loaded example Markdown draft.": "已载入 Markdown 样例草稿。",
       "record(s), newest first.": "条记录，最新在前。",
       "local record(s), newest first.": "条记录，最新在前。",
@@ -783,6 +830,7 @@ console.log("示例代码块");
       "Ready to write queued drafts one by one.": "可以逐篇写入队列草稿。",
       "Batch draft writing started.": "开始批量写入草稿。",
       "Queued draft not found": "未找到队列草稿",
+      "Draft added": "已新增草稿",
       "Markdown queued": "Markdown 已加入队列",
       "Queued Markdown": "已加入待发布队列",
       "Queued Markdown loaded.": "已载入队列中的 Markdown。",
@@ -956,6 +1004,7 @@ console.log("示例代码块");
       Smoke: "烟测",
       Example: "样例",
       "No title yet": "暂无标题",
+      "Article body": "文章正文",
       "Write Markdown to inspect the article structure.": "输入 Markdown 以检查文章结构。",
       "The preview focuses on publishing structure: headings, media, tables, code, tweet embeds, and the final import plan.": "预览聚焦发布结构：标题、媒体、表格、代码、推文嵌入和最终导入计划。",
       "This preview shows what xPoster found and what it will move into X.": "这里会显示 xPoster 识别到什么，以及会把什么搬进 X。",
@@ -1136,6 +1185,10 @@ console.log("示例代码块");
       "Set title and cover": "设置标题和封面",
       "Metadata will be attempted when available.": "可用时会尝试设置标题和封面。",
       "Title and cover will be added when available.": "有标题和封面时会自动设置。",
+      "Title will be applied when X allows it.": "X 允许时会设置标题。",
+      "Cover will be applied when X allows it.": "X 允许时会设置封面。",
+      "Title and cover will be applied when X allows it.": "X 允许时会设置标题和封面。",
+      "No title or cover is available to apply.": "没有可设置的标题或封面。",
       "Capture evidence": "保存记录",
       "Save import record": "保存导入记录",
       "Save a run record": "保存运行记录",
@@ -1433,6 +1486,30 @@ console.log("示例代码块");
       "Title and cover": "标题和封面",
       "Uses page UI first, then X Article GraphQL when an article id is available.": "优先使用页面 UI；有文章 ID 时再使用 X 文章接口。",
       "xPoster sets them automatically when the X Article editor allows it.": "当 X 文章编辑器允许时，xPoster 会自动设置。",
+      "Choose what xPoster writes into X Article metadata.": "选择 xPoster 要写入 X 文章元信息的内容。",
+      "Set article title": "设置文章标题",
+      "Use frontmatter title or the first H1.": "使用 frontmatter title 或第一个一级标题。",
+      "Set article cover": "设置文章封面",
+      "Use frontmatter cover or the first image.": "使用 frontmatter cover 或第一张图片。",
+      "Success feedback": "成功反馈",
+      "Choose the small celebration shown after a successful write.": "选择写入成功后显示的小反馈。",
+      "Celebration animation": "庆祝动画",
+      "Show a brief confetti burst when X reports a completed write.": "当 X 返回写入完成时，显示一次短暂彩纸动画。",
+      "Completion sound": "完成音效",
+      "Play a short local chime after a successful write.": "写入成功后播放一声本地短提示音。",
+      "Sound style": "音效风格",
+      "Soft chime": "轻柔提示",
+      "Warm bell": "温和铃声",
+      "Light pop": "轻快弹响",
+      "Volume": "音量",
+      "Test feedback": "测试反馈",
+      "Feedback test": "反馈测试",
+      "Use this to confirm animation and sound work in this Chrome profile.": "用它确认当前 Chrome 配置里的动画和音效是否可用。",
+      "Project and author": "项目与作者",
+      "Open the project page or follow updates from the author.": "打开项目页面，或关注作者更新。",
+      "Open GitHub project": "打开 GitHub 项目",
+      "GitHub project": "GitHub 项目",
+      "Follow author on X": "在 X 关注作者",
       Auto: "自动",
       Activity: "活动",
       "Recent activity": "最近活动",
@@ -1625,7 +1702,9 @@ console.log("示例代码块");
       "Unknown block": "未知内容块",
       "This block will be preserved as plain text if xPoster cannot map it.": "如果 xPoster 无法转换这个块，会按纯文本保留。",
       "No blockers found": "未发现阻塞项",
+      "Title setting is off; headings stay in the article body.": "标题设置已关闭；标题会留在正文中。",
       "No title detected. Add frontmatter title or a first-level heading.": "未检测到标题。请添加 frontmatter title 或一级标题。",
+      "Cover setting is off; images stay in the article body.": "封面设置已关闭；图片会留在正文中。",
       "Cover source matches an image in the article body.": "封面来源与正文中的图片匹配。",
       "Cover source is not also present as a body image; X cover assignment may be skipped.": "封面来源没有出现在正文图片中，X 可能跳过封面设置。",
       "No cover candidate detected. Add frontmatter cover or a first image.": "未检测到封面候选项。请添加 frontmatter cover 或第一张图片。",
@@ -1706,6 +1785,218 @@ console.log("示例代码块");
     els.themeChoice.querySelectorAll('input[name="themeMode"]').forEach((input) => {
       input.checked = input.value === currentThemeMode;
     });
+  }
+
+  function normalizeImportOptions(options = {}) {
+    return {
+      setTitle: options.setTitle !== false,
+      setCover: options.setCover !== false
+    };
+  }
+
+  function parseDraftMarkdown(markdown, options = importOptions) {
+    return shared.parseMarkdown(markdown, normalizeImportOptions(options));
+  }
+
+  function importOptionsPayload() {
+    return normalizeImportOptions(importOptions);
+  }
+
+  function syncImportOptionsControls() {
+    if (els.importTitleOption) els.importTitleOption.checked = importOptions.setTitle !== false;
+    if (els.importCoverOption) els.importCoverOption.checked = importOptions.setCover !== false;
+  }
+
+  function applyImportOptions(options = importOptions) {
+    importOptions = normalizeImportOptions(options);
+    syncImportOptionsControls();
+    if (latestParsed?.segments?.length || els.markdown?.value?.trim()) analyzeDraft();
+    else {
+      syncRemoteImageAccessStatusFromDraft(null);
+      updatePreflight();
+    }
+  }
+
+  async function setImportOptions(nextOptions, { persist = true } = {}) {
+    applyImportOptions(nextOptions);
+    if (persist && hasChromeApi()) {
+      await chrome.storage.local.set({ [STORAGE_IMPORT_OPTIONS]: importOptionsPayload() });
+    }
+  }
+
+  async function restoreImportOptions() {
+    if (hasChromeApi()) {
+      const stored = await chrome.storage.local.get(STORAGE_IMPORT_OPTIONS).catch(() => ({}));
+      applyImportOptions(stored[STORAGE_IMPORT_OPTIONS] || importOptions);
+      return;
+    }
+    applyImportOptions(importOptions);
+  }
+
+  function normalizeSuccessFeedbackOptions(options = {}) {
+    const volume = Number(options.volume);
+    return {
+      confetti: options.confetti !== false,
+      sound: options.sound !== false,
+      soundStyle: SUCCESS_SOUND_STYLES.has(options.soundStyle) ? options.soundStyle : "soft",
+      volume: Number.isFinite(volume) ? Math.min(1, Math.max(0.2, volume)) : 0.55
+    };
+  }
+
+  function successFeedbackPayload() {
+    return normalizeSuccessFeedbackOptions(successFeedbackOptions);
+  }
+
+  function syncSuccessFeedbackControls() {
+    if (els.confettiOption) els.confettiOption.checked = successFeedbackOptions.confetti !== false;
+    if (els.successSoundOption) els.successSoundOption.checked = successFeedbackOptions.sound !== false;
+    if (els.successSoundStyle) els.successSoundStyle.value = successFeedbackOptions.soundStyle || "soft";
+    if (els.successSoundVolume) els.successSoundVolume.value = String(Math.round((successFeedbackOptions.volume || 0.55) * 100));
+  }
+
+  function applySuccessFeedbackOptions(options = successFeedbackOptions) {
+    successFeedbackOptions = normalizeSuccessFeedbackOptions(options);
+    syncSuccessFeedbackControls();
+  }
+
+  async function setSuccessFeedbackOptions(nextOptions, { persist = true } = {}) {
+    applySuccessFeedbackOptions(nextOptions);
+    if (persist && hasChromeApi()) {
+      await chrome.storage.local.set({ [STORAGE_SUCCESS_FEEDBACK]: successFeedbackPayload() });
+    }
+  }
+
+  async function restoreSuccessFeedbackOptions() {
+    if (hasChromeApi()) {
+      const stored = await chrome.storage.local.get(STORAGE_SUCCESS_FEEDBACK).catch(() => ({}));
+      applySuccessFeedbackOptions(stored[STORAGE_SUCCESS_FEEDBACK] || successFeedbackOptions);
+      return;
+    }
+    applySuccessFeedbackOptions(successFeedbackOptions);
+  }
+
+  function ensureSuccessAudioContext({ force = false } = {}) {
+    if (!successFeedbackOptions.sound) return null;
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextCtor) return null;
+    if (!successAudioContext || successAudioContext.state === "closed" || force) successAudioContext = new AudioContextCtor();
+    return successAudioContext;
+  }
+
+  function primeSuccessAudio() {
+    const context = ensureSuccessAudioContext();
+    if (!context) return;
+    if (context.state === "suspended") {
+      context.resume().catch(() => {});
+    }
+  }
+
+  function successSoundNotes(style = successFeedbackOptions.soundStyle) {
+    if (style === "bell") {
+      return {
+        master: 0.06,
+        notes: [
+          { frequency: 587.33, start: 0, duration: 0.34, type: "sine", gain: 0.28 },
+          { frequency: 880, start: 0.055, duration: 0.42, type: "triangle", gain: 0.18 }
+        ]
+      };
+    }
+    if (style === "pop") {
+      return {
+        master: 0.055,
+        notes: [
+          { frequency: 698.46, start: 0, duration: 0.08, type: "triangle", gain: 0.34 },
+          { frequency: 1046.5, start: 0.08, duration: 0.11, type: "sine", gain: 0.25 }
+        ]
+      };
+    }
+    return {
+      master: 0.045,
+      notes: [
+        { frequency: 523.25, start: 0, duration: 0.18, type: "sine", gain: 0.36 },
+        { frequency: 659.25, start: 0.09, duration: 0.22, type: "sine", gain: 0.34 },
+        { frequency: 783.99, start: 0.18, duration: 0.24, type: "sine", gain: 0.3 }
+      ]
+    };
+  }
+
+  async function playSuccessSound({ force = false } = {}) {
+    const context = ensureSuccessAudioContext({ force });
+    if (!context) return;
+    if (context.state === "suspended") {
+      try {
+        await context.resume();
+      } catch {
+        return;
+      }
+    }
+    if (context.state === "closed" || context.state === "suspended") return;
+    const now = context.currentTime + 0.01;
+    const sound = successSoundNotes();
+    const volume = Math.min(1, Math.max(0.2, Number(successFeedbackOptions.volume) || 0.55));
+    const master = context.createGain();
+    master.gain.setValueAtTime(0.0001, now);
+    master.gain.exponentialRampToValueAtTime(sound.master * volume, now + 0.018);
+    master.gain.exponentialRampToValueAtTime(0.0001, now + 0.42);
+    master.connect(context.destination);
+
+    sound.notes.forEach((note) => {
+      const osc = context.createOscillator();
+      const gain = context.createGain();
+      const start = now + note.start;
+      const end = start + note.duration;
+      osc.type = note.type || "sine";
+      osc.frequency.setValueAtTime(note.frequency, start);
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(note.gain || 0.3, start + 0.018);
+      gain.gain.exponentialRampToValueAtTime(0.0001, end);
+      osc.connect(gain).connect(master);
+      osc.start(start);
+      osc.stop(end + 0.03);
+    });
+  }
+
+  function fireSuccessConfetti() {
+    if (!successFeedbackOptions.confetti || typeof window.confetti !== "function") return;
+    if (!successConfetti) {
+      const canvas = document.createElement("canvas");
+      canvas.className = "success-confetti-canvas";
+      canvas.setAttribute("aria-hidden", "true");
+      document.body.appendChild(canvas);
+      successConfetti = window.confetti.create(canvas, {
+        resize: true,
+        useWorker: false
+      });
+    }
+    const base = {
+      particleCount: 28,
+      spread: 54,
+      startVelocity: 28,
+      ticks: 120,
+      gravity: 0.86,
+      scalar: 0.74,
+      zIndex: 120,
+      disableForReducedMotion: true,
+      colors: SUCCESS_CONFETTI_COLORS
+    };
+    successConfetti({ ...base, angle: 64, origin: { x: 0.22, y: 0.18 } });
+    successConfetti({ ...base, angle: 116, origin: { x: 0.78, y: 0.18 } });
+  }
+
+  function triggerSuccessFeedback(summary = null) {
+    const key = String(latestProgress?.startedAt || summary?.elapsedMs || Date.now());
+    if (key && key === lastSuccessFeedbackKey) return;
+    lastSuccessFeedbackKey = key;
+    if (successFeedbackOptions.confetti) fireSuccessConfetti();
+    if (successFeedbackOptions.sound) void playSuccessSound();
+  }
+
+  function testSuccessFeedback() {
+    const key = `test-${Date.now()}`;
+    lastSuccessFeedbackKey = key;
+    if (successFeedbackOptions.confetti) fireSuccessConfetti();
+    if (successFeedbackOptions.sound) void playSuccessSound({ force: true });
+    setDraftDropStatus("Feedback test", "Use this to confirm animation and sound work in this Chrome profile.", "done");
   }
 
   function applyTheme(mode = currentThemeMode) {
@@ -2154,6 +2445,7 @@ console.log("示例代码块");
     }
     translateDynamicDom();
     updateDraftBrief();
+    renderRecordHistory();
     if (persist && hasChromeApi()) {
       chrome.storage.local.set({ [STORAGE_LANGUAGE]: currentLanguage });
     }
@@ -2263,11 +2555,11 @@ console.log("示例代码块");
     return { available, missing };
   }
 
-  function remoteImageOriginsForMarkdowns(markdowns = []) {
+  function remoteImageOriginsForMarkdowns(markdowns = [], options = importOptions) {
     const origins = new Set();
     for (const markdown of markdowns) {
       try {
-        for (const origin of remoteImageOrigins(shared.parseMarkdown(markdown || ""))) {
+        for (const origin of remoteImageOrigins(parseDraftMarkdown(markdown || "", options))) {
           origins.add(origin);
         }
       } catch {}
@@ -2314,6 +2606,7 @@ console.log("示例代码块");
     if (els.draftPanel) els.draftPanel.dataset.emptyDraft = hasDraft || queueModeActive() ? "false" : "true";
     if (!els.draftBrief) return;
     els.draftBrief.dataset.tone = hasDraft ? "ready" : "idle";
+    els.draftBrief.hidden = !hasDraft;
     setLocalizedText(els.draftRecognized, draftRecognitionText());
     if (els.draftTargetState) {
       els.draftTargetState.hidden = !hasDraft;
@@ -2362,7 +2655,7 @@ console.log("示例代码块");
     const markdown = els.markdown.value;
     if (!markdown.trim()) return null;
     try {
-      const parsed = shared.parseMarkdown(markdown);
+      const parsed = parseDraftMarkdown(markdown);
       latestParsed = parsed;
       latestCounts = shared.segmentCounts(parsed.segments);
       syncRemoteImageAccessStatusFromDraft(parsed);
@@ -2506,7 +2799,7 @@ console.log("示例代码块");
 
   function markdownQueueTitle(markdown, fallback = "Untitled Markdown") {
     try {
-      const parsed = shared.parseMarkdown(markdown || "");
+      const parsed = parseDraftMarkdown(markdown || "");
       if (parsed.title) return parsed.title;
       const heading = String(markdown || "").match(/^\s*#\s+(.+)$/m)?.[1]?.trim();
       return heading || fallback;
@@ -2622,6 +2915,18 @@ console.log("示例代码块");
     return `${total} draft${total === 1 ? "" : "s"} queued`;
   }
 
+  function queuedDraftAddedDetail(count = 1) {
+    const total = draftQueue.length;
+    if (currentLanguage === "zh") {
+      return `新增 ${count} 篇草稿，队列现在有 ${total} 篇。`;
+    }
+    return `${count} new draft${count === 1 ? "" : "s"} added. ${total} total in queue.`;
+  }
+
+  function showQueuedDraftAdded(count = 1) {
+    setDraftDropStatus("Draft added", queuedDraftAddedDetail(count), "done");
+  }
+
   function queueStatusLabel(item) {
     if (item.status === "writing" || item.id === activeWriteQueueItemId) return "Writing";
     return "Queued";
@@ -2701,7 +3006,7 @@ console.log("示例代码块");
     } else {
       if (activate) activeQueueItemId = item.id;
       renderDraftQueue();
-      setDraftDropStatus("Markdown queued", queueSummaryText(), "done");
+      showQueuedDraftAdded(1);
     }
     if (statusTitle && draftQueue.length === 1) setDraftDropStatus(statusTitle, draftReadyDetail(item.markdown.length), "done");
     if (logMessage) log(logMessage);
@@ -2773,6 +3078,7 @@ console.log("示例代码块");
     if (activateFirst) activeQueueItemId = nextItems[0].id;
     persistDraftQueue();
     renderDraftQueue();
+    showQueuedDraftAdded(nextItems.length);
     return nextItems;
   }
 
@@ -3033,16 +3339,18 @@ console.log("示例代码块");
       return;
     }
     try {
-      const parsed = shared.parseMarkdown(markdown);
+      const parsed = parseDraftMarkdown(markdown);
       const counts = shared.segmentCounts(parsed.segments);
       latestParsed = parsed;
       latestCounts = counts;
       els.inspector?.setAttribute("data-has-draft", "true");
       syncRemoteImageAccessStatusFromDraft(parsed);
       updateDraftBrief();
-      if (hasChromeApi() && remoteHttpImageSegments(parsed).length) {
+      const remoteImages = remoteHttpImageSegments(parsed);
+      if (hasChromeApi() && remoteImages.length) {
         refreshRemoteImageAccessStatus(parsed).catch(() => {});
       }
+      if (!remoteImages.length) resetRemoteImageProbeStatus(parsed);
       els.titleMetric.textContent = parsed.title || "None";
       els.imageMetric.textContent = String(counts.image || 0);
       els.tableMetric.textContent = String(counts.table || 0);
@@ -3132,6 +3440,8 @@ console.log("示例代码块");
     const uploadReady = Boolean(main.hasOnFilesAdded);
     const localVaultReady = Boolean(vault.configured && vault.permission === "granted");
     const remoteProbeBySource = new Map((remoteImageProbeStatus.results || []).map((item) => [item.source, item]));
+    const metadataOptions = importOptionsPayload();
+    const previewPlan = buildPreviewPlan(parsed);
 
     if (!parsed?.segments?.length) {
       return [
@@ -3147,11 +3457,10 @@ console.log("示例代码块");
       ];
     }
 
-    const previewPlan = shared.buildPastePlan(parsed.segments, previewImageMap(parsed), previewTableMap(parsed));
     let operationIndex = 0;
     const rows = [];
 
-    if (parsed.title) {
+    if (metadataOptions.setTitle && parsed.title) {
       rows.push({
         index: 0,
         indexLabel: "T",
@@ -3165,7 +3474,7 @@ console.log("示例代码块");
       });
     }
 
-    if (parsed.cover) {
+    if (metadataOptions.setCover && parsed.cover) {
       rows.push({
         index: 0,
         indexLabel: "C",
@@ -3178,7 +3487,7 @@ console.log("示例代码块");
     }
 
     parsed.segments.forEach((segment, segmentIndex) => {
-      const op = previewPlan.plan[operationIndex];
+      const op = previewPlan.operations[operationIndex];
       if (segment.type === "divider" || segment.type === "code" || segment.type === "tweet" || segment.type === "image" || segment.type === "table") {
         operationIndex += 1;
       }
@@ -3322,6 +3631,7 @@ console.log("示例代码块");
 
   function buildConversionMap(parsed, counts) {
     const empty = !parsed?.segments?.length;
+    const metadataOptions = importOptionsPayload();
     const imageSegments = parsed?.segments?.filter((segment) => segment.type === "image") || [];
     const localImages = imageSegments.filter((segment) => shared.isLocalImageSource(segment.source));
     const remoteImages = imageSegments.filter((segment) => isRemoteHttpImageSource(segment.source));
@@ -3353,20 +3663,30 @@ console.log("示例代码块");
       {
         id: "title",
         label: "Title",
-        tone: parsed.title ? "ok" : "warn",
-        detail: parsed.title ? "Will set the X Article title when possible." : "Add frontmatter title or a first H1.",
-        count: parsed.title ? 1 : 0
+        tone: metadataOptions.setTitle ? (parsed.title ? "ok" : "warn") : "idle",
+        detail: metadataOptions.setTitle
+          ? parsed.title
+            ? "Will set the X Article title when possible."
+            : "Add frontmatter title or a first H1."
+          : "Title setting is off; headings stay in the article body.",
+        count: metadataOptions.setTitle && parsed.title ? 1 : 0
       },
       {
         id: "cover",
         label: "Cover",
-        tone: parsed.cover ? (coverInBody || parsed.cover.startsWith("data:") ? "ok" : "warn") : "warn",
-        detail: parsed.cover
-          ? coverInBody || parsed.cover.startsWith("data:")
-            ? "Will use the matching uploaded image as the cover when possible."
-            : "Cover source has no matching body image; cover assignment may be skipped."
-          : "Add frontmatter cover or a first image.",
-        count: parsed.cover ? 1 : 0
+        tone: metadataOptions.setCover
+          ? parsed.cover
+            ? (coverInBody || parsed.cover.startsWith("data:") ? "ok" : "warn")
+            : "warn"
+          : "idle",
+        detail: metadataOptions.setCover
+          ? parsed.cover
+            ? coverInBody || parsed.cover.startsWith("data:")
+              ? "Will use the matching uploaded image as the cover when possible."
+              : "Cover source has no matching body image; cover assignment may be skipped."
+            : "Add frontmatter cover or a first image."
+          : "Cover setting is off; images stay in the article body.",
+        count: metadataOptions.setCover && parsed.cover ? 1 : 0
       },
       {
         id: "text",
@@ -3478,16 +3798,20 @@ console.log("示例代码块");
 
   function buildDraftReview(parsed, counts) {
     const notes = [];
+    const metadataOptions = importOptionsPayload();
     const imageSegments = parsed.segments.filter((segment) => segment.type === "image");
     const localImages = imageSegments.filter((segment) => shared.isLocalImageSource(segment.source));
     const remoteImages = imageSegments.filter((segment) => isRemoteHttpImageSource(segment.source));
     const absoluteLocalImages = localImages.filter((segment) => shared.isAbsoluteLocalImageSource(segment.source));
     const uploadCount = (counts.image || 0) + (counts.table || 0);
 
-    if (parsed.title) notes.push({ tone: "ok", text: `Title detected: ${parsed.title}` });
+    if (!metadataOptions.setTitle) notes.push({ tone: "idle", text: "Title setting is off; headings stay in the article body." });
+    else if (parsed.title) notes.push({ tone: "ok", text: `Title detected: ${parsed.title}` });
     else notes.push({ tone: "warn", text: "No title detected. Add frontmatter title or a first-level heading." });
 
-    if (parsed.cover) {
+    if (!metadataOptions.setCover) {
+      notes.push({ tone: "idle", text: "Cover setting is off; images stay in the article body." });
+    } else if (parsed.cover) {
       const coverInBody = imageSegments.some((segment) => segment.source === parsed.cover);
       notes.push({
         tone: coverInBody || parsed.cover.startsWith("data:") ? "ok" : "warn",
@@ -3548,7 +3872,7 @@ console.log("示例代码块");
     const safe = shared.escapeHtml;
     const derivedCounts = counts || shared.segmentCounts(parsed.segments);
     const specialCount = (derivedCounts.tweet || 0) + (derivedCounts.code || 0) + (derivedCounts.divider || 0);
-    els.previewTitle.textContent = parsed.title || "Untitled article";
+    els.previewTitle.textContent = importOptions.setTitle === false ? "Article body" : parsed.title || "Untitled article";
     els.previewMeta.textContent = [
       `${derivedCounts.text || 0} text part(s)`,
       `${derivedCounts.image || 0} image(s)`,
@@ -3634,7 +3958,24 @@ console.log("示例代码块");
         });
       }
     });
-    const plan = shared.buildPastePlan(parsed.segments, imageMap, tableMap);
+    const coverSource = importOptions.setCover === false ? "" : String(parsed.cover || "");
+    const coverSegment = coverSource && !parsed.segments.some(
+      (segment) => segment.type === "image" && shared.imageSourcesMatch(segment.source, coverSource)
+    )
+      ? { type: "image", source: coverSource, alt: "cover" }
+      : null;
+    if (coverSegment) {
+      imageMap.set(coverSegment, {
+        ok: true,
+        base64: "preview",
+        mime: "image/png",
+        fileName: "cover.png"
+      });
+    }
+    const plan = shared.buildPastePlan(parsed.segments, imageMap, tableMap, {
+      coverSource,
+      coverResult: coverSegment ? imageMap.get(coverSegment) : null
+    });
     const atomic = plan.plan.filter((item) => item.op.type === "atomic").length;
     const images = plan.plan.filter((item) => item.op.type === "image").length;
     const textBlocks = parsed.segments.filter((segment) => segment.type === "text").length;
@@ -3728,6 +4069,7 @@ console.log("示例代码块");
   }
 
   function runImportButtonAction() {
+    primeSuccessAudio();
     const checks = buildPreflightChecks();
     const gate = getImportGate(checks);
     const action = primaryImportAction(gate);
@@ -4256,7 +4598,14 @@ console.log("示例代码块");
     const importFailed = latestEvidence?.kind === "import-error";
     const needsMedia = (counts.image || 0) + (counts.table || 0) > 0;
     const needsBridge = (counts.tweet || 0) + (counts.code || 0) + (counts.divider || 0) > 0 || plan.summary.markers > 0;
-    const hasMetadata = Boolean(latestParsed?.title || latestParsed?.cover);
+    const metadataOptions = importOptionsPayload();
+    const metadataParts = [];
+    if (metadataOptions.setTitle && latestParsed?.title) metadataParts.push("title");
+    if (metadataOptions.setCover && latestParsed?.cover) metadataParts.push("cover");
+    const hasMetadata = metadataParts.length > 0;
+    const metadataLabel =
+      metadataParts.length === 2 ? "Title and cover" : metadataParts[0] === "title" ? "Title" : "Cover";
+    const metadataDetail = `${metadataLabel} will be applied when X allows it.`;
     const mediaTone = byId.get("uploads")?.tone || "warn";
     const mediaStatus = toneLabel(byId.get("uploads")?.tone);
     const pasteBlocked = Boolean(
@@ -4316,7 +4665,7 @@ console.log("示例代码块");
         label: "Set title and cover",
         tone: importSucceeded ? "ok" : hasMetadata ? (resolvedGate.ok ? "ready" : "warn") : latestParsed ? "idle" : "idle",
         detail: hasMetadata
-          ? `${latestParsed.title ? "Title" : "No title"}${latestParsed.cover ? " and cover" : ""} will be applied when X allows it.`
+          ? metadataDetail
           : latestParsed
             ? "No title or cover is available to apply."
             : "Title and cover will be added when available.",
@@ -4665,8 +5014,27 @@ console.log("示例代码块");
       };
     }
 
-    const plan = shared.buildPastePlan(parsed.segments, previewImageMap(parsed), previewTableMap(parsed));
+    const imageMap = previewImageMap(parsed);
+    const coverSource = importOptions.setCover === false ? "" : String(parsed.cover || "");
+    const coverSegment = coverSource && !parsed.segments.some(
+      (segment) => segment.type === "image" && shared.imageSourcesMatch(segment.source, coverSource)
+    )
+      ? { type: "image", source: coverSource, alt: "cover" }
+      : null;
+    const coverResult = coverSegment
+      ? {
+          ok: true,
+          base64: "preview",
+          mime: "image/png",
+          fileName: "cover.png"
+        }
+      : null;
+    const plan = shared.buildPastePlan(parsed.segments, imageMap, previewTableMap(parsed), {
+      coverSource,
+      coverResult
+    });
     const operations = plan.plan.map((item) => ({
+      op: item.op,
       marker: item.marker,
       type: item.op.type,
       entityType: item.op.entityType || null,
@@ -4810,6 +5178,9 @@ console.log("示例代码块");
   function setDraftDropStatus(title, detail, tone = "idle") {
     if (!els.draftDropStatus) return;
     els.draftDropStatus.dataset.tone = tone;
+    els.draftDropStatus.hidden = false;
+    els.draftDropStatus.setAttribute("role", tone === "error" ? "alert" : "status");
+    if (els.draftDropDismiss) els.draftDropDismiss.hidden = tone !== "error";
     const titleNode = els.draftDropStatus.querySelector("strong");
     const detailNode = els.draftDropStatus.querySelector("span");
     if (titleNode) {
@@ -4821,6 +5192,13 @@ console.log("示例代码块");
       detailNode.textContent = detail;
     }
     translateDynamicDom(els.draftDropStatus);
+  }
+
+  function dismissDraftDropStatus() {
+    if (!els.draftDropStatus) return;
+    els.draftDropStatus.hidden = true;
+    els.draftDropStatus.dataset.tone = "idle";
+    if (els.draftDropDismiss) els.draftDropDismiss.hidden = true;
   }
 
   function acknowledgeDraftInput() {
@@ -4855,6 +5233,7 @@ console.log("示例代码块");
 
   function resetLiveProgress(reason = "manual") {
     latestProgress = createLiveProgressState();
+    if (reason === "import") lastSuccessFeedbackKey = "";
     if (reason === "import") {
       latestProgress.state = "running";
       latestProgress.level = "work";
@@ -5457,10 +5836,11 @@ console.log("示例代码块");
     if (!/^https:\/\/(?:x|twitter)\.com\//.test(url)) {
       latestPageStatus = null;
       latestDiagnostics = null;
-      setPageState("Not on X", "warn");
+      setPageState("Open X Articles entry", "action", "openArticles");
       setReadiness({ target: "Open X", editor: "Unknown", vault: "Optional" });
       updateDraftBrief();
       updatePreflight();
+      updateProgressiveSections();
       return;
     }
     const response = await sendToActiveTab({ type: "xposter:page-status" });
@@ -5471,6 +5851,7 @@ console.log("示例代码块");
       setReadiness({ target: "X tab", editor: "Reload", vault: "Optional" });
       updateDraftBrief();
       updatePreflight();
+      updateProgressiveSections();
       return;
     }
     const previousUrl = latestPageStatus?.url || "";
@@ -5480,7 +5861,7 @@ console.log("示例代码块");
     if (oldImporter.detected) setPageState("Old importer active", "warn");
     else if (response.hasEditor) setPageState("Editor ready", "ready");
     else if (response.isArticleRoute) setPageState("X Articles ready", "ready");
-    else setPageState("Not an article page", "warn");
+    else setPageState("Open X Articles entry", "action", "openArticles");
     updateVaultState(response.vault);
     setReadiness({
       target: response.isArticleRoute ? "Articles" : "Go Articles",
@@ -5493,12 +5874,19 @@ console.log("示例代码块");
     });
     updateDraftBrief();
     updatePreflight();
+    updateProgressiveSections();
   }
 
-  function setPageState(text, tone) {
-    els.pageState.textContent = translateText(text);
+  function setPageState(text, tone, action = "") {
+    const label = els.pageState.querySelector("span") || els.pageState;
+    setLocalizedText(label, text);
     els.pageState.dataset.xposterSourceText = text;
+    els.pageState.dataset.pageAction = action;
     els.pageState.className = `page-state ${tone || ""}`;
+    els.pageState.disabled = !action;
+    const title = action === "openArticles" ? "Open X Articles entry" : text;
+    els.pageState.title = localizeText(title);
+    els.pageState.setAttribute("aria-label", localizeText(title));
   }
 
   function setReadiness({ target, editor, vault }) {
@@ -5527,10 +5915,10 @@ console.log("示例代码块");
     if (remoteImages.length) {
       log(`Preparing ${remoteImages.length} web image(s) for upload. Failed downloads will stay as Markdown links.`);
       await refreshRemoteImageAccessStatus(parsed);
-    } else {
-      await refreshRemoteImageAccessStatus(parsed);
-      updatePreflight();
+    } else if (remoteImageAccessStatus.origins.length) {
+      syncRemoteImageAccessStatusFromDraft(parsed);
     }
+    updatePreflight();
     let checks = buildPreflightChecks();
     const pageScriptCheck = checks.find((check) => check.id === "page-script");
     if (pageScriptCheck?.tone === "error") {
@@ -5596,6 +5984,7 @@ console.log("示例代码块");
     if (!currentDraftRecord()) rememberDraftHistory("typed");
     updatePreflight();
     updateWriteButton({ busy: true });
+    primeSuccessAudio();
     resetLiveProgress("import");
     log(batch ? "Batch draft writing started." : "Writing article started.");
     const target = await prepareSimpleWriteTarget(parsed);
@@ -5622,7 +6011,7 @@ console.log("示例代码块");
       persistDraftQueue();
       renderDraftQueue();
     }
-    const response = await sendToActiveTab({ type: "xposter:import-markdown", markdown });
+    const response = await sendToActiveTab({ type: "xposter:import-markdown", markdown, options: importOptionsPayload() });
     if (response?.ok) {
       const seconds = ((response.summary?.elapsedMs || 0) / 1000).toFixed(1);
       const warnings = response.summary?.mediaWarnings?.total || response.summary?.main?.imgFail || 0;
@@ -5631,6 +6020,7 @@ console.log("示例代码块");
       renderRunSummary(response.summary);
       captureEvidence("import", { result: response, targetContext: target.targetContext, pageStatus: latestPageStatus, diagnostics: latestDiagnostics });
       markActiveQueueItemWritten();
+      triggerSuccessFeedback(response.summary);
     } else {
       log(`Import failed: ${response?.error || "unknown error"}`);
       if (latestProgress.state !== "error") recordLiveProgressEvent("error", { error: response?.error || "unknown error" });
@@ -5670,7 +6060,7 @@ console.log("示例代码块");
     batchWriting = true;
     updateWriteButton();
     try {
-      const origins = remoteImageOriginsForMarkdowns(draftQueue.map((item) => item.markdown));
+      const origins = remoteImageOriginsForMarkdowns(draftQueue.map((item) => item.markdown), importOptions);
       if (origins.length) {
         const permission = await requestRemoteImageAccessForOrigins(origins, latestParsed);
         if (!permission.ok) {
@@ -5866,7 +6256,6 @@ console.log("示例代码块");
           source: "file"
         });
         if (added.length) {
-          setDraftDropStatus("Markdown queued", queueSummaryText(), "done");
           log(`Queued ${added.length} Markdown draft${added.length === 1 ? "" : "s"}.`);
         } else {
           setDraftDropStatus("Markdown queued", "No new Markdown drafts were added.", "idle");
@@ -5939,21 +6328,19 @@ console.log("示例代码块");
 
   function installDraftDropTray() {
     if (!els.draftPanel) return;
-    let dragDepth = 0;
+    let dragActive = false;
     let dragCancelled = false;
     const activateDropzone = () => {
       if (dragCancelled) return;
       showWorkspacePanel("draft");
       setActiveJump("draft");
-      els.draftPanel.dataset.dropLabel = localizeText("Drop Markdown here");
-      els.draftPanel.dataset.dropHint = localizeText("Release to load");
+      dragActive = true;
       els.draftPanel.classList.add("drag-active");
       setDraftDropStatus("Drop Markdown here", "Release to load it.", "ready");
     };
     const deactivateDropzone = () => {
+      dragActive = false;
       els.draftPanel.classList.remove("drag-active");
-      delete els.draftPanel.dataset.dropLabel;
-      delete els.draftPanel.dataset.dropHint;
     };
     const restoreDropStatus = () => {
       setDraftDropStatus(
@@ -5965,16 +6352,20 @@ console.log("示例代码块");
       );
     };
     const cancelDropzone = () => {
-      if (!dragDepth && !els.draftPanel.classList.contains("drag-active")) return;
+      if (!dragActive && !els.draftPanel.classList.contains("drag-active")) return;
       dragCancelled = true;
-      dragDepth = 0;
       deactivateDropzone();
       setDraftDropStatus("Drop cancelled", "Paste text or choose a .md file.", "idle");
     };
+    const leftWindow = (event) =>
+      event.clientX <= 0 ||
+      event.clientY <= 0 ||
+      event.clientX >= window.innerWidth ||
+      event.clientY >= window.innerHeight;
     document.addEventListener("dragenter", (event) => {
       if (!hasMarkdownTransfer(event.dataTransfer)) return;
       if (!els.draftPanel.classList.contains("drag-active")) dragCancelled = false;
-      dragDepth += 1;
+      event.preventDefault();
       activateDropzone();
     }, true);
     document.addEventListener("dragover", (event) => {
@@ -5983,9 +6374,8 @@ console.log("示例代码块");
       event.dataTransfer.dropEffect = dragCancelled ? "none" : "copy";
       activateDropzone();
     }, true);
-    document.addEventListener("dragleave", () => {
-      dragDepth = Math.max(0, dragDepth - 1);
-      if (!dragDepth) {
+    document.addEventListener("dragleave", (event) => {
+      if (leftWindow(event)) {
         dragCancelled = false;
         deactivateDropzone();
         restoreDropStatus();
@@ -6001,12 +6391,11 @@ console.log("示例代码块");
       event.stopPropagation();
       if (dragCancelled) {
         dragCancelled = false;
-        dragDepth = 0;
         deactivateDropzone();
         restoreDropStatus();
         return;
       }
-      dragDepth = 0;
+      dragCancelled = false;
       deactivateDropzone();
       setDraftDropStatus("Reading Markdown...", "Reading dropped Markdown.", "ready");
       const markdownFiles = Array.from(event.dataTransfer.files || []).filter((item) => /\.(md|markdown|mdown|mkd|txt)$/i.test(item.name || ""));
@@ -6016,7 +6405,6 @@ console.log("示例代码块");
           source: "drop-file"
         });
         if (added.length) {
-          setDraftDropStatus("Markdown queued", queueSummaryText(), "done");
           log(`Queued ${added.length} Markdown draft${added.length === 1 ? "" : "s"}.`);
         } else {
           setDraftDropStatus("Markdown queued", "No new Markdown drafts were added.", "idle");
@@ -6141,7 +6529,7 @@ console.log("示例代码块");
         if (draftQueue.length > previousLength) {
           showWorkspacePanel("draft");
           setActiveJump("draft");
-          setDraftDropStatus("Markdown queued", queueSummaryText(), "done");
+          showQueuedDraftAdded(draftQueue.length - previousLength);
         }
       }
     });
@@ -6394,13 +6782,6 @@ console.log("示例代码块");
     return currentLanguage === "zh" ? "还没有图片上传结果" : "No image upload result";
   }
 
-  function formatRecordSourceText(record) {
-    const source = record?.source || {};
-    const label = translateText(source.label || "Draft");
-    if (source.fileName) return `${label}: ${source.fileName}`;
-    return label;
-  }
-
   function recordHasMarkdown(record) {
     return Boolean(String(record?.markdown || record?.evidence?.draft?.markdown || "").trim());
   }
@@ -6455,6 +6836,13 @@ console.log("示例代码块");
   function formatRecordTime(value) {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return value || "";
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const startOfDate = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+    const dayDiff = Math.round((startOfToday - startOfDate) / 86400000);
+    const time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    if (dayDiff === 0) return currentLanguage === "zh" ? `今天 ${time}` : `Today ${time}`;
+    if (dayDiff === 1) return currentLanguage === "zh" ? `昨天 ${time}` : `Yesterday ${time}`;
     return date.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
   }
 
@@ -6463,17 +6851,20 @@ console.log("示例代码块");
     if (record.characters) items.push(currentLanguage === "zh" ? `${record.characters} 字` : `${record.characters} chars`);
     if (record.blocks) items.push(currentLanguage === "zh" ? `${record.blocks} 块` : `${record.blocks} blocks`);
     if (record.remoteImages?.count) items.push(currentLanguage === "zh" ? `${record.remoteImages.count} 图` : `${record.remoteImages.count} images`);
-    if (record.source?.fileName) items.push(record.source.fileName);
     return items.slice(0, 3);
   }
 
   function recordSourceMeta(record, updatedTime) {
     const parts = [];
-    const source = formatRecordSourceText(record);
+    const source = translateText(record?.source?.label || "Draft");
     if (source) parts.push(source);
     if (updatedTime) parts.push(updatedTime);
-    if (record.url) parts.push(currentLanguage === "zh" ? "有网页地址" : "Linked page");
+    if (record.url) parts.push(translateText("Linked page"));
     return parts.join(" · ");
+  }
+
+  function recordFileName(record) {
+    return String(record?.source?.fileName || "").trim();
   }
 
   function recordHumanStatus(record) {
@@ -6736,19 +7127,20 @@ console.log("示例代码块");
     const articleUrl = record.url || "";
     const recordState = recordHumanStatus(record);
     const metaText = recordSourceMeta(record, updatedTime);
+    const fileName = recordFileName(record);
+    const fileNameHtml = fileName ? `<span class="record-file-name">${safe(fileName)}</span>` : "";
     const linkAction = articleUrl
       ? `<a class="record-icon-action" href="${safe(articleUrl)}" target="_blank" rel="noopener noreferrer" title="${safe("Open linked page")}" aria-label="${safe("Open linked page")}">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6h-2V7.4l-7.3 7.3-1.4-1.4L16.6 6H14V4ZM5 6h7v2H7v9h9v-5h2v7H5V6Z"/></svg>
         </a>`
-      : `<span class="record-icon-action is-disabled" title="${safe("No link saved")}" aria-label="${safe("No link saved")}">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.6 13.4 9.2 12l2.8-2.8L9.8 7H7V4h4l2.4 2.4L16 3.8 17.4 5 5 17.4 3.6 16l7-7Zm2.8 2.8 1.8 1.8H18v-2.8l-1.5-1.5 1.4-1.4 3.1 3.1V21h-5.6L12 17.6l1.4-1.4Z"/></svg>
-        </span>`;
+      : "";
     return `
       <li class="record-history-item" data-tone="${safe(record.tone)}" data-record-id="${safe(record.id)}" tabindex="0" aria-label="${safe("Edit this saved Markdown.")}">
         <article class="record-draft-card">
           <header class="record-draft-head">
             <div class="record-title">
               <strong>${safe(displayTitle)}</strong>
+              ${fileNameHtml}
               <em>${safe(metaText || "Saved Markdown")}</em>
             </div>
             <span class="record-status">${safe(recordState)}</span>
@@ -7462,6 +7854,9 @@ console.log("示例代码块");
     }, 0);
   });
   els.importDraft.addEventListener("click", runImportButtonAction);
+  els.pageState?.addEventListener("click", async () => {
+    if (els.pageState.dataset.pageAction === "openArticles") await openArticles();
+  });
   els.nextActionButton?.addEventListener("click", runNextAction);
   els.dockCheck.addEventListener("click", runPreflight);
   els.dockImport.addEventListener("click", runImportButtonAction);
@@ -7469,6 +7864,7 @@ console.log("示例代码块");
   els.openArticles.addEventListener("click", openArticles);
   els.runPreflight.addEventListener("click", runPreflight);
   els.loadFile.addEventListener("click", loadFile);
+  els.draftDropDismiss?.addEventListener("click", dismissDraftDropStatus);
   els.loadSmoke?.addEventListener("click", loadSmokeFixture);
   els.pickVault.addEventListener("click", chooseVault);
   els.pickVaultSettings.addEventListener("click", chooseVault);
@@ -7515,6 +7911,33 @@ console.log("示例代码块");
     const input = event.target.closest('input[name="themeMode"]');
     if (input) setTheme(input.value);
   });
+  els.metadataOptions?.addEventListener("change", () => {
+    setImportOptions({
+      setTitle: els.importTitleOption?.checked !== false,
+      setCover: els.importCoverOption?.checked !== false
+    });
+  });
+  els.successFeedbackOptions?.addEventListener("change", () => {
+    setSuccessFeedbackOptions({
+      confetti: els.confettiOption?.checked !== false,
+      sound: els.successSoundOption?.checked !== false,
+      soundStyle: els.successSoundStyle?.value || "soft",
+      volume: Number(els.successSoundVolume?.value || 55) / 100
+    });
+  });
+  els.successSoundStyle?.addEventListener("change", () => {
+    setSuccessFeedbackOptions({
+      ...successFeedbackOptions,
+      soundStyle: els.successSoundStyle.value || "soft"
+    });
+  });
+  els.successSoundVolume?.addEventListener("input", () => {
+    setSuccessFeedbackOptions({
+      ...successFeedbackOptions,
+      volume: Number(els.successSoundVolume.value || 55) / 100
+    });
+  });
+  els.testSuccessFeedback?.addEventListener("click", testSuccessFeedback);
   els.liveRunbookList.addEventListener("click", async (event) => {
     const button = event.target.closest("button[data-runbook-action]");
     if (!button) return;
@@ -7551,6 +7974,8 @@ console.log("示例代码块");
   restoreRecordHistory();
   restoreLiveResultChecks();
   restoreTheme();
+  restoreImportOptions();
+  restoreSuccessFeedbackOptions();
   installSystemThemeSync();
   updateLiveProgress();
   refreshPageState();

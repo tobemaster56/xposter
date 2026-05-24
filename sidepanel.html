@@ -15,7 +15,9 @@
           <p class="topbar-subtitle visually-hidden" data-i18n="Paste Markdown, then write it into the current or new X Article.">Paste Markdown, then write it into the current or new X Article.</p>
         </div>
         <div class="topbar-actions">
-          <span class="page-state warn" id="pageState" data-i18n="Checking X">Checking X</span>
+          <button class="page-state action" id="pageState" type="button" data-page-action="openArticles" title="Open X Articles entry" aria-label="Open X Articles entry" data-i18n-title="Open X Articles entry" data-i18n-aria-label="Open X Articles entry">
+            <span data-i18n="Open X Articles entry">Open X Articles entry</span>
+          </button>
         </div>
       </header>
 
@@ -139,12 +141,19 @@
         <div class="drop-status" id="draftDropStatus" data-tone="idle" aria-live="polite">
           <strong data-i18n="Markdown draft">Markdown draft</strong>
           <span data-i18n="Paste Markdown here, choose a file, or drop .md files.">Paste Markdown here, choose a file, or drop .md files.</span>
+          <button class="drop-status-dismiss" id="draftDropDismiss" type="button" title="Close" aria-label="Close" data-i18n-title="Close" data-i18n-aria-label="Close" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6.4 5 5.6 5.6L17.6 5 19 6.4 13.4 12l5.6 5.6-1.4 1.4-5.6-5.6L6.4 19 5 17.6l5.6-5.6L5 6.4 6.4 5Z"/></svg>
+          </button>
+        </div>
+        <div class="draft-drop-target" id="draftDropTarget" aria-hidden="true">
+          <strong data-i18n="Drop Markdown here">Drop Markdown here</strong>
+          <span data-i18n="Release anywhere in this panel to load or queue the draft.">Release anywhere in this panel to load or queue the draft.</span>
         </div>
         <div class="draft-brief" id="draftBrief" data-tone="idle" aria-live="polite">
           <span id="draftRecognized" data-i18n="Step 1: paste Markdown, or choose a .md file.">Step 1: paste Markdown, or choose a .md file.</span>
           <span id="draftTargetState" hidden></span>
         </div>
-        <textarea id="markdown" spellcheck="false" placeholder="# Article title&#10;&#10;Paste Markdown here."></textarea>
+        <textarea id="markdown" spellcheck="false" placeholder="Paste Markdown here, choose a file, or drop .md files." data-i18n-placeholder="Paste Markdown here, choose a file, or drop .md files."></textarea>
         <section class="draft-queue" id="draftQueue" aria-label="Pending Markdown queue" data-i18n-aria-label="Pending Markdown queue" hidden>
           <div class="draft-queue-head">
             <div>
@@ -199,6 +208,7 @@
           <div class="record-search">
             <label class="visually-hidden" for="recordSearchInput" data-i18n="Find previous text">Find previous text</label>
             <input id="recordSearchInput" type="search" autocomplete="off" placeholder="Search Markdown text, title, file, or URL" data-i18n-placeholder="Search Markdown text, title, file, or URL" />
+            <button class="secondary compact danger record-clear-button" id="clearRecordHistory" type="button" disabled data-i18n="Clear all">Clear all</button>
             <span id="recordHistoryMeta">No records yet.</span>
             <span class="visually-hidden" id="recordSearchSummary">Find the Markdown you used before, copy it, or edit it before writing.</span>
           </div>
@@ -870,34 +880,6 @@
         </div>
         <div class="setting-row">
           <div>
-            <strong data-i18n="Everything is included">Everything is included</strong>
-            <span data-i18n="No account, subscription, trial limit, or feature lock.">No account, subscription, trial limit, or feature lock.</span>
-          </div>
-          <span class="setting-value" data-i18n="On">On</span>
-        </div>
-        <div class="setting-row">
-          <div>
-            <strong data-i18n="Installed version">Installed version</strong>
-            <span data-i18n="Use this number to confirm Chrome has reloaded the newest xPoster build.">Use this number to confirm Chrome has reloaded the newest xPoster build.</span>
-          </div>
-          <span class="setting-value" id="settingsVersion">v...</span>
-        </div>
-        <div class="setting-row">
-          <div>
-            <strong data-i18n="Privacy and control">Privacy and control</strong>
-            <span data-i18n="Your draft stays in this browser. xPoster fills the editor only; you still review and publish in X.">Your draft stays in this browser. xPoster fills the editor only; you still review and publish in X.</span>
-          </div>
-          <span class="setting-value" data-i18n="Local">Local</span>
-        </div>
-        <div class="setting-row">
-          <div>
-            <strong data-i18n="Web image handling">Web image handling</strong>
-            <span data-i18n="xPoster tries public image downloads in the background; failed downloads stay as Markdown links.">xPoster tries public image downloads in the background; failed downloads stay as Markdown links.</span>
-          </div>
-          <span class="setting-value" data-i18n="Auto">Auto</span>
-        </div>
-        <div class="setting-row">
-          <div>
             <strong data-i18n="Local image folder">Local image folder</strong>
             <span id="vaultSettingsText">Choose the folder that contains relative image paths in your Markdown.</span>
           </div>
@@ -906,19 +888,82 @@
             <button class="secondary compact danger" id="clearVaultSettings" disabled data-i18n="Clear">Clear</button>
           </div>
         </div>
-        <div class="setting-row">
-          <div>
-            <strong data-i18n="Records">Records</strong>
-            <span data-i18n="Clear saved record history from this browser.">Clear saved record history from this browser.</span>
-          </div>
-          <button class="secondary compact danger" id="clearRecordHistory" type="button" disabled data-i18n="Clear records">Clear records</button>
-        </div>
-        <div class="setting-row">
+        <div class="setting-row setting-row-stack">
           <div>
             <strong data-i18n="Title and cover">Title and cover</strong>
-            <span data-i18n="xPoster sets them automatically when the X Article editor allows it.">xPoster sets them automatically when the X Article editor allows it.</span>
+            <span data-i18n="Choose what xPoster writes into X Article metadata.">Choose what xPoster writes into X Article metadata.</span>
           </div>
-          <span class="setting-value" data-i18n="Auto">Auto</span>
+          <fieldset class="setting-checks" id="metadataOptions" aria-label="Title and cover" data-i18n-aria-label="Title and cover">
+            <legend class="visually-hidden" data-i18n="Title and cover">Title and cover</legend>
+            <label>
+              <input type="checkbox" id="importTitleOption" checked />
+              <span>
+                <strong data-i18n="Set article title">Set article title</strong>
+                <em data-i18n="Use frontmatter title or the first H1.">Use frontmatter title or the first H1.</em>
+              </span>
+            </label>
+            <label>
+              <input type="checkbox" id="importCoverOption" checked />
+              <span>
+                <strong data-i18n="Set article cover">Set article cover</strong>
+                <em data-i18n="Use frontmatter cover or the first image.">Use frontmatter cover or the first image.</em>
+              </span>
+            </label>
+          </fieldset>
+        </div>
+        <div class="setting-row setting-row-stack">
+          <div>
+            <strong data-i18n="Success feedback">Success feedback</strong>
+            <span data-i18n="Choose the small celebration shown after a successful write.">Choose the small celebration shown after a successful write.</span>
+          </div>
+          <fieldset class="setting-checks" id="successFeedbackOptions" aria-label="Success feedback" data-i18n-aria-label="Success feedback">
+            <legend class="visually-hidden" data-i18n="Success feedback">Success feedback</legend>
+            <label>
+              <input type="checkbox" id="confettiOption" checked />
+              <span>
+                <strong data-i18n="Celebration animation">Celebration animation</strong>
+                <em data-i18n="Show a brief confetti burst when X reports a completed write.">Show a brief confetti burst when X reports a completed write.</em>
+              </span>
+            </label>
+            <label>
+              <input type="checkbox" id="successSoundOption" checked />
+              <span>
+                <strong data-i18n="Completion sound">Completion sound</strong>
+                <em data-i18n="Play a short local chime after a successful write.">Play a short local chime after a successful write.</em>
+              </span>
+            </label>
+          </fieldset>
+          <div class="setting-subcontrols">
+            <label>
+              <span data-i18n="Sound style">Sound style</span>
+              <select id="successSoundStyle" aria-label="Sound style" data-i18n-aria-label="Sound style">
+                <option value="soft" data-i18n="Soft chime">Soft chime</option>
+                <option value="bell" data-i18n="Warm bell">Warm bell</option>
+                <option value="pop" data-i18n="Light pop">Light pop</option>
+              </select>
+            </label>
+            <label>
+              <span data-i18n="Volume">Volume</span>
+              <input id="successSoundVolume" type="range" min="20" max="100" step="5" value="55" aria-label="Volume" data-i18n-aria-label="Volume" />
+            </label>
+            <button class="secondary compact" id="testSuccessFeedback" type="button" data-i18n="Test feedback">Test feedback</button>
+          </div>
+        </div>
+        <div class="setting-row setting-row-stack">
+          <div>
+            <strong data-i18n="Project and author">Project and author</strong>
+            <span data-i18n="Open the project page or follow updates from the author.">Open the project page or follow updates from the author.</span>
+          </div>
+          <div class="setting-links" aria-label="Project and author" data-i18n-aria-label="Project and author">
+            <a class="setting-link" href="https://github.com/nevertoday/xposter" target="_blank" rel="noopener noreferrer" title="Open GitHub project" aria-label="Open GitHub project" data-i18n-title="Open GitHub project" data-i18n-aria-label="Open GitHub project">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 0 0-3.2 19.5c.5.1.7-.2.7-.5v-1.8c-2.8.6-3.4-1.2-3.4-1.2-.5-1.1-1.1-1.4-1.1-1.4-.9-.6.1-.6.1-.6 1 0 1.6 1.1 1.6 1.1.9 1.5 2.4 1.1 2.9.8.1-.7.4-1.1.7-1.3-2.2-.3-4.6-1.1-4.6-5A3.9 3.9 0 0 1 6.8 8.9c-.1-.3-.5-1.3.1-2.7 0 0 .9-.3 2.8 1a9.7 9.7 0 0 1 5.1 0c1.9-1.3 2.8-1 2.8-1 .6 1.4.2 2.4.1 2.7a3.9 3.9 0 0 1 1.1 2.7c0 3.9-2.4 4.7-4.6 5 .4.3.7 1 .7 2v2.4c0 .3.2.6.7.5A10 10 0 0 0 12 2Z"/></svg>
+              <span data-i18n="GitHub project">GitHub project</span>
+            </a>
+            <a class="setting-link" href="https://x.com/xiaoxiaodong01" target="_blank" rel="noopener noreferrer" title="Follow author on X" aria-label="Follow author on X" data-i18n-title="Follow author on X" data-i18n-aria-label="Follow author on X">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.4 10.5 21.7 2h-1.8l-6.3 7.4L8.5 2H2.7l7.7 11.2L2.7 22h1.8l6.7-7.8 5.3 7.8h5.8l-7.9-11.5Zm-2.4 2.8-.8-1.1L5 3.4h2.6l5 7.1.8 1.1 6.5 9.1h-2.6L12 13.3Z"/></svg>
+              <span data-i18n="Follow author on X">Follow author on X</span>
+            </a>
+          </div>
         </div>
       </section>
 
@@ -955,6 +1000,7 @@
 
     <script src="src/i18n.js"></script>
     <script src="src/shared.js"></script>
+    <script src="vendor/canvas-confetti.browser.min.js"></script>
     <script src="sidepanel.js"></script>
   </body>
 </html>
