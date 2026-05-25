@@ -2714,7 +2714,7 @@
     if (markdownTextFromTransfer(dataTransfer)) return true;
     const items = Array.from(dataTransfer?.items || []);
     if (items.filter(isLikelyMarkdownTransferItem).length === 1) return true;
-    return hasSingleUnknownFileItem(dataTransfer);
+    return false;
   }
 
   function isLeavingDocument(event) {
@@ -2760,12 +2760,6 @@
 
   function isLikelyMarkdownTransferItem(item) {
     return item?.kind === "file" && /^(text\/markdown|text\/plain)$/i.test(item.type || "");
-  }
-
-  function hasSingleUnknownFileItem(dataTransfer) {
-    const items = Array.from(dataTransfer?.items || []);
-    if (items.length !== 1 || items[0]?.kind !== "file") return false;
-    return !items[0].type && !isDirectoryTransferItem(items[0]);
   }
 
   function isLikelyImageTransferItem(item) {

@@ -218,7 +218,7 @@ assert.ok(
     contentScriptText.includes("async function importSingleMarkdownFileFromDrop") &&
     contentScriptText.includes("async function resumePendingArticleImport") &&
     contentScriptText.includes('safeRuntimeSendMessage({ type: "xposter:open-articles" })') &&
-    contentScriptText.includes("function hasSingleUnknownFileItem") &&
+    !contentScriptText.includes("function hasSingleUnknownFileItem") &&
     contentScriptText.includes("if (files.length > 1) return \"sidepanel-queue\";") &&
     contentScriptText.includes("if (files.length === 1) return \"\";") &&
     contentScriptText.includes("const panelPromise = safeRuntimeSendMessage({ type: \"xposter:open-side-panel\" }).catch(() => {})") &&
@@ -282,6 +282,13 @@ assert.equal(statusSandbox.statusHelpers.articleExportLabel("copy"), "复制 Mar
 assert.ok(
   mainWorldText.includes("uploadFilesToEditor"),
   "main-world bridge should hand dropped image files to X's own uploader"
+);
+assert.ok(
+  mainWorldText.includes("function markerTokenPattern") &&
+    mainWorldText.includes("text.replace(markerPattern, \"\")") &&
+    mainWorldText.includes("summary.markersCleaned += cleanupMarkers(draftNode, payload.markerPrefix)") &&
+    mainWorldText.includes("draftNode = findDraftStateNode() || draftNode;"),
+  "main-world cleanup should remove leftover xPoster marker tokens from the latest Draft.js state"
 );
 assert.ok(
   mainWorldText.includes("const MEDIA_UPLOAD_BASE_TIMEOUT_MS = 90000") &&

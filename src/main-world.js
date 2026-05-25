@@ -518,6 +518,11 @@
     return true;
   }
 
+  function markerTokenPattern(markerPrefix) {
+    const prefix = String(markerPrefix || "__XPOSTER_").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`${prefix}[A-Z]+_\\d+__`, "g");
+  }
+
   function relocateImages(draftNode, uploads, protectedAtomicBlocks) {
     if (!uploads.length) return { moved: 0, missing: 0 };
     const editorState = draftNode.props.editorState;
@@ -601,18 +606,37 @@
   }
 
   function cleanupMarkers(draftNode, markerPrefix) {
+    const resolvedPrefix = String(markerPrefix || "__XPOSTER_");
     const editorState = draftNode.props.editorState;
     const EditorState = editorState.constructor;
     const SelectionState = editorState.getSelection().constructor;
     const contentState = editorState.getCurrentContent();
     let blockMap = contentState.getBlockMap();
     const toDelete = [];
+    const replacements = [];
+    const markerPattern = markerTokenPattern(resolvedPrefix);
     blockMap.forEach((block, key) => {
-      if (block.getType() !== "atomic" && (block.getText() || "").trim().startsWith(markerPrefix)) {
+      if (block.getType() === "atomic") return;
+      const text = block.getText() || "";
+      if (!text.includes(resolvedPrefix)) return;
+      const cleaned = text.replace(markerPattern, "").replace(/\s{2,}/g, " ").trim();
+      if (!cleaned) {
         toDelete.push(key);
+      } else if (cleaned !== text) {
+        replacements.push({ key, text: cleaned });
       }
     });
-    if (!toDelete.length) return 0;
+    if (!toDelete.length && !replacements.length) return 0;
+    for (const replacement of replacements) {
+      const block = blockMap.get(replacement.key);
+      if (!block) continue;
+      const characterFactory = block.getCharacterList().get(0)?.constructor;
+      const character = characterFactory ? characterFactory.create({}) : null;
+      const characterList = block.getCharacterList().clear().concat(
+        Array.from({ length: replacement.text.length }, () => character)
+      );
+      blockMap = blockMap.set(replacement.key, block.merge({ text: replacement.text, characterList }));
+    }
     for (const key of toDelete) blockMap = blockMap.delete(key);
     const lastKey = blockMap.last()?.getKey?.();
     const selection = lastKey ? SelectionState.createEmpty(lastKey) : editorState.getSelection();
@@ -623,7 +647,7 @@
     let nextEditorState = EditorState.push(editorState, nextContent, "remove-range");
     nextEditorState = EditorState.moveSelectionToEnd(nextEditorState);
     draftNode.props.onChange(nextEditorState);
-    return toDelete.length;
+    return toDelete.length + replacements.length;
   }
 
   function kickRender(draftNode) {
@@ -929,6 +953,7 @@
     }
 
     progress("Cleaning up import markers...");
+    draftNode = findDraftStateNode() || draftNode;
     summary.markersCleaned += cleanupMarkers(draftNode, payload.markerPrefix);
     kickRender(draftNode);
     await sleep(250);
