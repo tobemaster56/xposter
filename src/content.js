@@ -17,6 +17,12 @@
   const MAX_SIDEPANEL_QUEUE_STORAGE_BYTES = 4 * 1024 * 1024;
   const MAX_SIDEPANEL_QUEUE_ITEM_BYTES = 512 * 1024;
   const PENDING_ARTICLE_IMPORT_TTL_MS = 10 * 60 * 1000;
+  const X_ARTICLE_MEDIA_SOFT_LIMIT = 25;
+  const X_ARTICLE_MEDIA_HEADROOM_THRESHOLD = 20;
+  const X_ARTICLE_MEDIA_LIMIT_WARNING =
+    "Image plan: {count}/25, above xPoster's verified X Article limit. Split the draft or remove images before writing to avoid a late X rejection.";
+  const X_ARTICLE_MEDIA_HEADROOM_NOTE =
+    "Image plan: {count}/25. You are close to the verified X Article limit; split the draft before adding many more images.";
   const ARTICLE_EXPORT_MIN_SCORE = 12;
   const CONTENT_ZH_TEXT = new Map(Object.entries({
     "xPoster page drop target": "xPoster 页面拖拽目标",
@@ -27,6 +33,8 @@
     "Could not write": "无法写入",
     "Writing article": "正在写入文章",
     "Preparing Markdown...": "正在准备 Markdown...",
+    "Stop": "停止",
+    "Stopping...": "正在停止...",
     "Stop requested": "已请求停止",
     "Open X Articles first": "请先打开 X 文章",
     "X editor bridge is not ready": "X 编辑器桥接尚未就绪",
@@ -88,6 +96,8 @@
     "X editor bridge did not respond": "X 编辑器桥接没有响应",
     "X image upload failed": "X 图片上传失败",
     "X media upload took too long. X may be throttling this draft, especially with many images. Wait a moment, then write again or split the article.": "X 上传图片等待太久。图片较多时 X 可能会限速。可以稍等后再次写入，或把文章拆成多篇。",
+    [X_ARTICLE_MEDIA_LIMIT_WARNING]: "图片容量：{count}/25，已超过 xPoster 实测上限。建议先拆成多篇或减少图片，避免写到最后被 X 拒绝。",
+    [X_ARTICLE_MEDIA_HEADROOM_NOTE]: "图片容量：{count}/25。已经接近 X 文章实测上限，继续加图前建议先考虑拆篇。",
     "Local image folder cleared": "本地图片文件夹已清除",
     "Could not set local image folder": "无法设置本地图片文件夹"
   }));
@@ -245,6 +255,15 @@
       [/^Prepared (\d+)\/(\d+) image\(s\)\.\.\.$/, "已准备 $1/$2 张图片..."],
       [/^Retrying image (.+)\.\.\.$/, "正在重试图片 $1..."],
       [/^Rendering (\d+) table\(s\)\.\.\.$/, "正在渲染 $1 个表格..."],
+      [/^Uploading image (\d+)\/(\d+)\.\.\.$/, "正在上传图片 $1/$2..."],
+      [/^Pasting structured Markdown\.\.\.$/, "正在粘贴结构化 Markdown..."],
+      [/^Inserting (\d+) special block\(s\)\.\.\.$/, "正在插入 $1 个特殊内容块..."],
+      [/^Reordering uploaded media\.\.\.$/, "正在整理已上传图片..."],
+      [/^Setting title\.\.\.$/, "正在设置标题..."],
+      [/^Setting cover\.\.\.$/, "正在设置封面..."],
+      [/^Cleaning up import markers\.\.\.$/, "正在清理写入标记..."],
+      [/^Image plan: (\d+)\/25, above xPoster's verified X Article limit\. Split the draft or remove images before writing to avoid a late X rejection\.$/, "图片容量：$1/25，已超过 xPoster 实测上限。建议先拆成多篇或减少图片，避免写到最后被 X 拒绝。"],
+      [/^Image plan: (\d+)\/25\. You are close to the verified X Article limit; split the draft before adding many more images\.$/, "图片容量：$1/25。已经接近 X 文章实测上限，继续加图前建议先考虑拆篇。"],
       [/^Article written(?: in (.+))?\.$/, (_, elapsed) => elapsed ? `文章已写入，用时 ${elapsed}。` : "文章已写入。"],
       [/^Article written(?: in (.+))?\. (.+) web image\(s\) stayed as Markdown links\.(?: Replace unreachable image URLs with public links, then write again if those images must upload\.)?$/, (_, elapsed, images) => elapsed ? `文章已写入，用时 ${elapsed}。${images} 张网页图片保留为 Markdown 链接。` : `文章已写入。${images} 张网页图片保留为 Markdown 链接。`],
       [/^Article written(?: in (.+))?\. (.+) image upload\(s\) timed out in X\. Wait a moment, then write again or split the article if it has many images\.$/, (_, elapsed, images) => elapsed ? `文章已写入，用时 ${elapsed}。${images} 张图片在 X 上传时等待过久。可以稍等后再次写入，或把多图文章拆成多篇。` : `文章已写入。${images} 张图片在 X 上传时等待过久。可以稍等后再次写入，或把多图文章拆成多篇。`],
@@ -366,10 +385,18 @@
       card.innerHTML = `
         <div class="__xposter_status_head">
           <span>xPoster</span>
-          <strong></strong>
+          <div class="__xposter_status_actions">
+            <strong></strong>
+            <button class="__xposter_status_stop" type="button" hidden></button>
+          </div>
         </div>
         <p></p>
       `;
+      card.querySelector(".__xposter_status_stop")?.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        cancelActiveImport();
+      });
       document.body.appendChild(card);
       injectStatusStyle();
     }
@@ -382,9 +409,24 @@
     updateStatusProgress(card, text, level, previousLevel);
     if (title) title.textContent = translateContentText(statusTitleForLevel(level));
     if (detail) detail.textContent = translateContentText(text);
+    syncStatusStopButton(card, level);
     document.body.classList.add("__xposter_status_visible");
     broadcast({ type: "status", text, level });
     if (timeout) window.setTimeout(hideStatus, timeout);
+  }
+
+  function syncStatusStopButton(card = document.getElementById(STATUS_ID), level = card?.dataset?.level || "work") {
+    const button = card?.querySelector?.(".__xposter_status_stop");
+    if (!card || !button) return;
+    const stopping = state.busy && state.cancelRequested;
+    const canStop = state.busy && !stopping && (level === "work" || level === "warn");
+    const visible = canStop || stopping;
+    button.hidden = !visible;
+    button.disabled = stopping;
+    button.textContent = translateContentText(stopping ? "Stopping..." : "Stop");
+    button.setAttribute("aria-label", translateContentText(stopping ? "Stopping..." : "Stop"));
+    card.dataset.cancelling = String(stopping);
+    card.dataset.cancellable = String(visible);
   }
 
   function hideStatus() {
@@ -422,6 +464,7 @@
       const detail = status.querySelector("p");
       if (title) title.textContent = translateContentText(statusTitleForLevel(level));
       if (detail) detail.textContent = translateContentText(status.dataset.statusText || contentSourceText(detail.textContent || ""));
+      syncStatusStopButton(status, level);
     }
     updateArticleExportButtonMode();
     updateVisibleDropHintCopy();
@@ -477,7 +520,7 @@
         font: 13px/1.45 ui-sans-serif, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif;
         letter-spacing: 0;
         box-shadow: 0 16px 38px rgba(15, 20, 25, 0.10);
-        pointer-events: none;
+        pointer-events: auto;
         animation: __xposter_status_in 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
       }
       #${STATUS_ID}[data-theme="dark"] {
@@ -571,6 +614,45 @@
         font-size: 12px;
         line-height: 1.2;
       }
+      #${STATUS_ID} .__xposter_status_actions {
+        display: inline-flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+        min-width: 0;
+      }
+      #${STATUS_ID} .__xposter_status_stop {
+        appearance: none;
+        border: 1px solid color-mix(in oklch, var(--__xposter-status-tone), var(--__xposter-status-line) 54%);
+        border-radius: 999px;
+        padding: 3px 8px;
+        background: color-mix(in oklch, var(--__xposter-status-tone), transparent 94%);
+        color: var(--__xposter-status-tone-text);
+        font: inherit;
+        font-size: 11px;
+        font-weight: 720;
+        line-height: 1.25;
+        cursor: pointer;
+        transition: transform 140ms cubic-bezier(0.22, 1, 0.36, 1), background-color 140ms ease-out, border-color 140ms ease-out, opacity 140ms ease-out;
+      }
+      #${STATUS_ID} .__xposter_status_stop[hidden] {
+        display: none;
+      }
+      #${STATUS_ID} .__xposter_status_stop:hover {
+        transform: translateY(-1px);
+        background: color-mix(in oklch, var(--__xposter-status-tone), transparent 88%);
+      }
+      #${STATUS_ID} .__xposter_status_stop:active {
+        transform: translateY(0) scale(0.97);
+      }
+      #${STATUS_ID} .__xposter_status_stop:disabled {
+        cursor: default;
+        opacity: 0.72;
+        transform: none;
+      }
+      #${STATUS_ID}[data-cancelling="true"] .__xposter_status_stop {
+        animation: __xposter_status_stop_pulse 1.2s ease-in-out infinite;
+      }
       #${STATUS_ID} p {
         position: relative;
         z-index: 2;
@@ -586,10 +668,18 @@
         from { transform: translateX(-110%); }
         to { transform: translateX(330%); }
       }
+      @keyframes __xposter_status_stop_pulse {
+        0%, 100% { opacity: 0.68; }
+        50% { opacity: 1; }
+      }
       @media (prefers-reduced-motion: reduce) {
         #${STATUS_ID},
+        #${STATUS_ID}[data-cancelling="true"] .__xposter_status_stop,
         #${STATUS_ID}[data-progress="indeterminate"]::before {
           animation: none;
+        }
+        #${STATUS_ID} .__xposter_status_stop {
+          transition: none;
         }
       }
     `;
@@ -686,6 +776,60 @@
     return { ok: true, cancelled: true };
   }
 
+  function articleMediaUploadEstimate(parsed = null, options = {}) {
+    const segments = Array.isArray(parsed?.segments) ? parsed.segments : [];
+    const bodyImages = segments.filter((segment) => segment.type === "image").length;
+    const tables = segments.filter((segment) => segment.type === "table").length;
+    const coverSource = options.setCover === false ? "" : String(parsed?.cover || "").trim();
+    const coverOnly = coverSource && !segments.some(
+      (segment) => segment.type === "image" && shared.imageSourcesMatch(segment.source, coverSource)
+    )
+      ? 1
+      : 0;
+    const total = bodyImages + tables + coverOnly;
+    return {
+      bodyImages,
+      tables,
+      coverOnly,
+      total,
+      nearSoftLimit: total >= X_ARTICLE_MEDIA_HEADROOM_THRESHOLD && total <= X_ARTICLE_MEDIA_SOFT_LIMIT,
+      overSoftLimit: total > X_ARTICLE_MEDIA_SOFT_LIMIT
+    };
+  }
+
+  function mediaLimitText(template, estimate) {
+    return String(template || "").replace("{count}", String(estimate?.total || 0));
+  }
+
+  function mediaLimitWarningText(estimate) {
+    return mediaLimitText(X_ARTICLE_MEDIA_LIMIT_WARNING, estimate);
+  }
+
+  function mediaHeadroomText(estimate) {
+    return mediaLimitText(X_ARTICLE_MEDIA_HEADROOM_NOTE, estimate);
+  }
+
+  function preflightArticleMediaLimit(markdown, options = {}) {
+    const importOptions = normalizeImportOptions(options);
+    const parsed = shared.parseMarkdown(markdown || "", importOptions);
+    const estimate = articleMediaUploadEstimate(parsed, importOptions);
+    if (estimate.overSoftLimit) {
+      return {
+        ok: false,
+        parsed,
+        estimate,
+        error: mediaLimitWarningText(estimate),
+        mediaLimit: true
+      };
+    }
+    return {
+      ok: true,
+      parsed,
+      estimate,
+      warning: estimate.nearSoftLimit ? mediaHeadroomText(estimate) : ""
+    };
+  }
+
   function runMain(payload, filePayloads = new Map()) {
     return new Promise((resolve, reject) => {
       let timeout = null;
@@ -773,6 +917,13 @@
       const limitedParsed = { ...parsed, segments };
       const counts = shared.segmentCounts(segments);
       broadcast({ type: "parsed", parsed: { title: parsed.title, cover: parsed.cover, counts } });
+      const mediaEstimate = articleMediaUploadEstimate(limitedParsed, importOptions);
+      if (mediaEstimate.overSoftLimit) {
+        const limitMessage = mediaLimitWarningText(mediaEstimate);
+        showStatus(limitMessage, "warn", 9000);
+        broadcast({ type: "preflight-blocked", level: "warn", text: limitMessage, mediaLimit: true, estimate: mediaEstimate });
+        return { ok: false, error: limitMessage, mediaLimit: true, estimate: mediaEstimate };
+      }
 
       const localImages = segments.filter((segment) => segment.type === "image" && shared.isLocalImageSource(segment.source));
       const coverSource = limitedParsed.cover || "";
@@ -847,6 +998,7 @@
       state.cancelRequested = false;
       state.activeRun = null;
       state.currentMarkdown = "";
+      syncStatusStopButton();
     }
   }
 
@@ -1277,6 +1429,24 @@
       showStatus("Drop a Markdown file or Markdown text.", "warn", 5000);
       return { ok: false, error: "No Markdown content" };
     }
+    const preflight = preflightArticleMediaLimit(text);
+    if (!preflight.ok) {
+      showStatus(preflight.error, "warn", 9000);
+      broadcast({
+        type: "preflight-blocked",
+        level: "warn",
+        text: preflight.error,
+        mediaLimit: true,
+        estimate: preflight.estimate,
+        fileName,
+        source
+      });
+      return { ok: false, error: preflight.error, mediaLimit: true, estimate: preflight.estimate };
+    }
+    if (preflight.warning) {
+      showStatus(preflight.warning, "warn", 6500);
+      await sleep(650);
+    }
     const stored = await savePendingArticleImport(text, { fileName, source });
     showStatus("Opening X Article...", "work");
     try {
@@ -1308,6 +1478,25 @@
     if (!pending?.markdown) return;
     showStatus("Opening X Article...", "work");
     try {
+      const preflight = preflightArticleMediaLimit(pending.markdown);
+      if (!preflight.ok) {
+        await discardPendingArticleImport();
+        showStatus(preflight.error, "warn", 9000);
+        broadcast({
+          type: "preflight-blocked",
+          level: "warn",
+          text: preflight.error,
+          mediaLimit: true,
+          estimate: preflight.estimate,
+          fileName: pending.fileName || "",
+          source: pending.source || "drop"
+        });
+        return;
+      }
+      if (preflight.warning) {
+        showStatus(preflight.warning, "warn", 6500);
+        await sleep(650);
+      }
       await ensureEditorReadyForFileImport();
       const stored = await takePendingArticleImport();
       await importMarkdown(stored?.markdown || pending.markdown, pending.source || "drop");

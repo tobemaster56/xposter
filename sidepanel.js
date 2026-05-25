@@ -5801,6 +5801,13 @@ console.log("示例代码块");
       latestProgress.text = "Writing stopped by user.";
       latestProgress.detail = payload.reason || "Writing stopped by user.";
       latestProgress.percent = Math.max(latestProgress.percent || 0, 100);
+    } else if (eventName === "preflight-blocked") {
+      latestProgress.state = "error";
+      latestProgress.level = "warn";
+      latestProgress.error = payload.error || payload.text || "Check the draft before writing.";
+      latestProgress.text = payload.text || latestProgress.error;
+      latestProgress.detail = payload.error || payload.text || "Check the draft before writing.";
+      latestProgress.percent = Math.max(latestProgress.percent || 0, 100);
     } else {
       latestProgress.state = "running";
       latestProgress.level = payload.level || "work";
@@ -5817,6 +5824,7 @@ console.log("示例代码块");
     if (eventName === "complete") return "done";
     if (eventName === "error") return "error";
     if (eventName === "cancelled") return "warn";
+    if (eventName === "preflight-blocked") return "warn";
     if (eventName === "parsed") return "work";
     return "work";
   }
@@ -5826,6 +5834,7 @@ console.log("示例代码块");
     if (eventName === "parsed") return "Markdown parsed";
     if (eventName === "complete") return "Writing complete";
     if (eventName === "cancelled") return payload.reason || "Writing stopped by user.";
+    if (eventName === "preflight-blocked") return payload.text || payload.error || "Check the draft before writing.";
     if (eventName === "error") return payload.error || "Writing failed";
     return localizeText(payload.text || eventName);
   }
@@ -6361,7 +6370,19 @@ console.log("示例代码块");
     resetLiveProgress("import");
     importCancelRequested = false;
     const mediaEstimate = mediaUploadEstimate(parsed);
-    if (mediaEstimate.overSoftLimit) log(mediaLimitWarningText(mediaEstimate));
+    if (mediaEstimate.overSoftLimit) {
+      const message = mediaLimitWarningText(mediaEstimate);
+      log(message);
+      recordLiveProgressEvent("preflight-blocked", { text: message, error: message, level: "warn", mediaLimit: true });
+      updateWriteButton();
+      activeWriteQueueItemId = null;
+      if (queueItemId) {
+        draftQueue = draftQueue.map((item) => item.id === queueItemId && item.status === "writing" ? { ...item, status: "queued" } : item);
+        persistDraftQueue();
+        renderDraftQueue();
+      }
+      return { ok: false, error: message, mediaLimit: true };
+    }
     const target = await prepareSimpleWriteTarget(parsed);
     if (!target.ok) {
       log(target.reason || "Could not prepare X Article.");

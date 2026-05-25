@@ -321,6 +321,9 @@ assert.ok(
   sidepanelHtml.includes('id="cancelImport"') &&
     sidepanelText.includes('sendToActiveTab({ type: "xposter:cancel-import" })') &&
     contentScriptText.includes('message?.type === "xposter:cancel-import"') &&
+    contentScriptText.includes('class="__xposter_status_stop"') &&
+    contentScriptText.includes('cancelActiveImport();') &&
+    contentScriptText.includes("function syncStatusStopButton") &&
     contentScriptText.includes("function cancelActiveImport") &&
     contentScriptText.includes("function throwIfImportCancelled") &&
     mainWorldText.includes("throwIfCancelled") &&
@@ -329,6 +332,12 @@ assert.ok(
 );
 assert.ok(
   sidepanelText.includes("const X_ARTICLE_MEDIA_SOFT_LIMIT = 25") &&
+    contentScriptText.includes("const X_ARTICLE_MEDIA_SOFT_LIMIT = 25") &&
+    contentScriptText.includes("function preflightArticleMediaLimit") &&
+    contentScriptText.includes("function articleMediaUploadEstimate") &&
+    contentScriptText.includes('type: "preflight-blocked"') &&
+    contentScriptText.includes("mediaLimitWarningText") &&
+    contentScriptText.includes("mediaHeadroomText") &&
     sidepanelText.includes("const X_ARTICLE_MEDIA_HEADROOM_THRESHOLD = 20") &&
     sidepanelText.includes("X_ARTICLE_MEDIA_LIMIT_WARNING") &&
     sidepanelText.includes("X_ARTICLE_MEDIA_HEADROOM_NOTE") &&
@@ -338,11 +347,20 @@ assert.ok(
     sidepanelText.includes("mediaHeadroomText") &&
     sidepanelText.includes("mediaCapacityText") &&
     sidepanelText.includes("nearSoftLimit") &&
+    sidepanelText.includes('recordLiveProgressEvent("preflight-blocked"') &&
     sidepanelText.includes("X Article media note") &&
     sidepanelText.includes("Image plan: {count}/25") &&
     sidepanelText.includes("Split the draft") &&
     sidepanelText.includes("remove images"),
   "draft preflight should show gentle media capacity before X rejects Article media beyond the verified 25-image Article limit"
+);
+assert.ok(
+  contentScriptText.includes("[/^Uploading image (\\d+)\\/(\\d+)\\.\\.\\.$/, \"正在上传图片 $1/$2...\"]") &&
+    contentScriptText.includes("正在设置封面") &&
+    contentScriptText.includes("正在清理写入标记") &&
+    contentScriptText.includes("\"Stop\": \"停止\"") &&
+    contentScriptText.includes("\"Stopping...\": \"正在停止...\""),
+  "X page upload progress and stop controls should stay localized in Chinese"
 );
 assert.ok(
   sidepanelText.includes('options: importOptionsPayload()'),
