@@ -506,14 +506,14 @@ h2 {
 
 .draft-drop-target {
   position: absolute;
-  inset: 48px 12px 62px;
-  z-index: 14;
+  inset: 48px 12px 0;
+  z-index: 24;
   display: none;
   place-content: center;
   justify-items: center;
   gap: 8px;
   padding: 22px;
-  pointer-events: none;
+  pointer-events: auto;
   border: 1px dashed color-mix(in oklch, var(--signal), var(--line) 52%);
   border-radius: 7px;
   background:
@@ -1043,9 +1043,13 @@ h2 {
 }
 
 .composer.drag-active .actions {
-  border-color: color-mix(in oklch, var(--line), var(--ink) 16%);
-  background: var(--paper);
-  box-shadow: 0 -8px 18px color-mix(in oklch, var(--ink), transparent 91%);
+  border-color: color-mix(in oklch, var(--signal), var(--line) 52%);
+  background:
+    linear-gradient(180deg, color-mix(in oklch, var(--signal), var(--paper) 94%), color-mix(in oklch, var(--paper), var(--signal) 4%)),
+    var(--paper);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, var(--signal-ink), transparent 82%),
+    0 -8px 18px color-mix(in oklch, var(--ink), transparent 91%);
   opacity: 1;
   pointer-events: none;
 }

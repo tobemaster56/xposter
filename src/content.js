@@ -3116,7 +3116,9 @@
   }
 
   function isMarkdownFile(file) {
-    return Boolean(file?.name && /\.(md|markdown|mdown|mkd|txt)$/i.test(file.name));
+    if (!file?.name || !/\.(md|markdown|mdown|mkd|txt)$/i.test(file.name)) return false;
+    if (!file.type) return true;
+    return /^(text\/markdown|text\/plain|application\/octet-stream)$/i.test(file.type);
   }
 
   function isExplicitImageInsertDrop(dataTransfer, event = null) {
@@ -3142,7 +3144,9 @@
   }
 
   function isLikelyMarkdownTransferItem(item) {
-    return item?.kind === "file" && /^(text\/markdown|text\/plain)$/i.test(item.type || "");
+    if (item?.kind !== "file") return false;
+    if (!item.type) return true;
+    return /^(text\/markdown|text\/plain|application\/octet-stream)$/i.test(item.type || "");
   }
 
   function isLikelyImageTransferItem(item) {

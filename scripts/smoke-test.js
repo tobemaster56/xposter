@@ -471,8 +471,18 @@ assert.ok(
   "side panel should report remote image host access from runtime permissions"
 );
 assert.ok(
-  sidepanelText.includes("remoteImageOriginsForMarkdowns(draftQueue.map((item) => item.markdown), importOptions)"),
-  "batch queue writes should request all remote image origins during the user action"
+  sidepanelText.includes("function preflightMarkdowns") &&
+    sidepanelText.includes("function preflightSegmentCounts") &&
+    sidepanelText.includes("function localImageFolderStatusForMarkdowns") &&
+    sidepanelText.includes("function remoteHttpImageSegmentsForMarkdowns") &&
+    sidepanelText.includes("function mediaUploadEstimateForMarkdowns") &&
+    sidepanelText.includes("remoteImageOriginsForMarkdowns(draftQueue.map((item) => item.markdown), importOptions)") &&
+    sidepanelText.includes("const preflightContext = { markdowns }") &&
+    sidepanelText.includes("localAssetWriteBlocker(checks, preflightContext)") &&
+    sidepanelText.includes("firstQueueMediaLimitBlocker(mediaUploadEstimateForMarkdowns(markdowns, importOptions))") &&
+    sidepanelText.includes('localizeInterpolated("Draft {index}: {title}"') &&
+    sidepanelMessagesText.includes('"Draft {index}: {title}"'),
+  "batch queue writes should aggregate queued Markdown preflight, request all remote image origins, and block local/media problems before the first write"
 );
 assert.ok(
   sidepanelText.includes("function hasMarkdownTransfer") &&
@@ -577,6 +587,7 @@ assert.ok(
     sidepanelHtml.includes("xPoster will ask when a Markdown draft uses local image paths.") &&
     sidepanelText.includes("function localImageReferences") &&
     sidepanelText.includes("function localImageFolderStatus") &&
+    sidepanelText.includes("function activeLocalImageFolderStatus") &&
     sidepanelText.includes("function localAssetWriteBlocker") &&
     sidepanelText.includes("handleLocalAssetWriteBlocker(localAssetBlocker") &&
     sidepanelText.includes('button[data-preflight-action]') &&
@@ -586,6 +597,15 @@ assert.ok(
     sidepanelCss.includes("grid-template-columns: 18px minmax(0, 1fr) auto;") &&
     sidepanelCss.includes(".preflight-action[hidden]"),
   "local image folder access should stay contextual: settings only shows status, preflight shows the action, and writes block before unresolved local assets start"
+);
+assert.ok(
+  sidepanelText.includes("function parseMarkdownForWrite") &&
+    sidepanelText.includes("({ parsed, counts } = parseMarkdownForWrite(markdown))") &&
+    sidepanelText.includes("const preflightContext = { parsed, counts }") &&
+    sidepanelText.includes("buildPreflightChecks(preflightContext)") &&
+    sidepanelText.includes("prepareSimpleWriteTarget(parsed, preflightContext)") &&
+    !sidepanelText.includes("const parsed = ensureLatestParsedFromDraft();"),
+  "writes should parse the Markdown argument being written instead of relying on stale global editor analysis"
 );
 assert.ok(
   contentScriptText.includes("[/^Uploading image (\\d+)\\/(\\d+)\\.\\.\\.$/, \"正在上传图片 $1/$2...\"]") &&
@@ -1021,7 +1041,7 @@ assert.ok(
     sidepanelCss.includes(".composer.drag-active .draft-drop-target") &&
     sidepanelCss.includes(".composer.drag-active .actions") &&
     sidepanelCss.includes("color-mix(in oklch, var(--signal), var(--paper) 94%)") &&
-    sidepanelCss.includes(".composer.drag-active .actions {\n  border-color: color-mix(in oklch, var(--line), var(--ink) 16%);\n  background: var(--paper);") &&
+    sidepanelCss.includes(".composer.drag-active .actions {\n  border-color: color-mix(in oklch, var(--signal), var(--line) 52%);\n  background:") &&
     sidepanelCss.includes("xposter-queue-item-enter") &&
     sidepanelCss.includes(".draft-queue-item[data-status=\"writing\"] .draft-queue-index") &&
     sidepanelText.includes("function markQueueItemsEntered") &&
@@ -1078,12 +1098,13 @@ assert.ok(
   "settings should expose page celebration, sound, and sound style without volume or a feedback test control"
 );
 assert.ok(
-  sidepanelText.includes("triggerSuccessFeedback(response.summary)") &&
+  sidepanelText.includes("if (!batch || draftQueue.length === 0)") &&
+    sidepanelText.includes("triggerSuccessFeedback(response.summary)") &&
     sidepanelText.includes("requestPageSuccessCelebration(summary)") &&
     sidepanelText.includes('type: "xposter:success-celebration"') &&
     sidepanelText.includes("colors: SUCCESS_CELEBRATION_COLORS") &&
     sidepanelText.includes("lastSuccessFeedbackKey"),
-  "successful imports should request one celebration on the active X page"
+  "successful imports should request one celebration on the active X page, and batch writes should wait for the final queued item"
 );
 assert.ok(
   sidepanelText.includes('return ["running", "parsed", "error"].includes(progress?.state);') &&

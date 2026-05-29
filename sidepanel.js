@@ -1564,8 +1564,7 @@
     return references;
   }
 
-  function localImageFolderStatus(parsed = latestParsed, vault = currentVault()) {
-    const references = localImageReferences(parsed);
+  function localImageFolderStatusForReferences(references = [], vault = currentVault()) {
     const absoluteCount = references.filter((item) => shared.isAbsoluteLocalImageSource(item.source)).length;
     const folderReady = Boolean(vault?.configured && vault.permission === "granted");
     return {
@@ -1576,6 +1575,26 @@
       ready: !references.length || Boolean(!absoluteCount && folderReady),
       vault: vault || {}
     };
+  }
+
+  function localImageFolderStatus(parsed = latestParsed, vault = currentVault()) {
+    return localImageFolderStatusForReferences(localImageReferences(parsed), vault);
+  }
+
+  function localImageReferencesForMarkdowns(markdowns = [], options = importOptions) {
+    const references = [];
+    markdowns.forEach((markdown, index) => {
+      try {
+        for (const reference of localImageReferences(parseDraftMarkdown(markdown || "", options))) {
+          references.push({ ...reference, draftIndex: index });
+        }
+      } catch {}
+    });
+    return references;
+  }
+
+  function localImageFolderStatusForMarkdowns(markdowns = [], options = importOptions, vault = currentVault()) {
+    return localImageFolderStatusForReferences(localImageReferencesForMarkdowns(markdowns, options), vault);
   }
 
   function remoteHttpImageSegments(parsed = latestParsed) {
@@ -1612,6 +1631,66 @@
     return Array.from(remoteImageOriginCounts(parsed).keys());
   }
 
+  function addSegmentCounts(target, source) {
+    for (const [type, count] of Object.entries(source || {})) {
+      target[type] = (target[type] || 0) + Number(count || 0);
+    }
+    return target;
+  }
+
+  function markdownsSegmentCounts(markdowns = [], options = importOptions) {
+    const counts = shared.segmentCounts([]);
+    for (const markdown of markdowns) {
+      try {
+        addSegmentCounts(counts, shared.segmentCounts(parseDraftMarkdown(markdown || "", options).segments));
+      } catch {}
+    }
+    return counts;
+  }
+
+  function draftQueueMarkdowns() {
+    return draftQueue.map((item) => item.markdown || "");
+  }
+
+  function activePreflightCounts() {
+    return queueModeActive()
+      ? markdownsSegmentCounts(draftQueueMarkdowns(), importOptions)
+      : latestCounts || shared.segmentCounts([]);
+  }
+
+  function contextHasOwn(context, key) {
+    return Object.prototype.hasOwnProperty.call(context || {}, key);
+  }
+
+  function preflightMarkdowns(context = {}) {
+    if (Array.isArray(context.markdowns)) return context.markdowns;
+    if (contextHasOwn(context, "parsed")) return null;
+    return queueModeActive() ? draftQueueMarkdowns() : null;
+  }
+
+  function preflightParsed(context = {}) {
+    if (contextHasOwn(context, "parsed")) return context.parsed;
+    return preflightMarkdowns(context) ? null : latestParsed;
+  }
+
+  function preflightSegmentCounts(context = {}) {
+    if (context.counts) return context.counts;
+    const markdowns = preflightMarkdowns(context);
+    if (markdowns) return markdownsSegmentCounts(markdowns, importOptions);
+    const parsed = preflightParsed(context);
+    return parsed ? shared.segmentCounts(parsed.segments) : latestCounts || shared.segmentCounts([]);
+  }
+
+  function preflightLocalImageFolderStatus(context = {}, vault = currentVault()) {
+    const markdowns = preflightMarkdowns(context);
+    if (markdowns) return localImageFolderStatusForMarkdowns(markdowns, importOptions, vault);
+    return localImageFolderStatus(preflightParsed(context), vault);
+  }
+
+  function activeLocalImageFolderStatus(vault = currentVault()) {
+    return preflightLocalImageFolderStatus({}, vault);
+  }
+
   function mediaUploadEstimate(parsed = latestParsed) {
     if (!parsed?.segments?.length) {
       return {
@@ -1639,6 +1718,53 @@
       total,
       nearSoftLimit: total >= X_ARTICLE_MEDIA_HEADROOM_THRESHOLD && total <= X_ARTICLE_MEDIA_SOFT_LIMIT,
       overSoftLimit: total > X_ARTICLE_MEDIA_SOFT_LIMIT
+    };
+  }
+
+  function mediaUploadEstimateForMarkdowns(markdowns = [], options = importOptions) {
+    const totals = {
+      bodyImages: 0,
+      tables: 0,
+      coverOnly: 0,
+      total: 0,
+      nearSoftLimit: false,
+      overSoftLimit: false,
+      overItems: []
+    };
+    markdowns.forEach((markdown, index) => {
+      try {
+        const estimate = mediaUploadEstimate(parseDraftMarkdown(markdown || "", options));
+        totals.bodyImages += estimate.bodyImages || 0;
+        totals.tables += estimate.tables || 0;
+        totals.coverOnly += estimate.coverOnly || 0;
+        totals.total += estimate.total || 0;
+        totals.nearSoftLimit = totals.nearSoftLimit || Boolean(estimate.nearSoftLimit);
+        totals.overSoftLimit = totals.overSoftLimit || Boolean(estimate.overSoftLimit);
+        if (estimate.overSoftLimit) totals.overItems.push({ index, estimate });
+      } catch {}
+    });
+    return totals;
+  }
+
+  function activePreflightMediaEstimate() {
+    return queueModeActive()
+      ? mediaUploadEstimateForMarkdowns(draftQueueMarkdowns(), importOptions)
+      : mediaUploadEstimate(latestParsed);
+  }
+
+  function firstQueueMediaLimitBlocker(estimate = activePreflightMediaEstimate()) {
+    const first = estimate?.overItems?.[0];
+    if (!first) return null;
+    const item = draftQueue[first.index] || null;
+    const index = Number(first.index || 0) + 1;
+    const title = queueItemDisplayTitle(item);
+    const detail = `${localizeInterpolated("Draft {index}: {title}", { index, title })}. ${mediaLimitWarningText(first.estimate)}`;
+    return {
+      item,
+      index,
+      estimate: first.estimate,
+      title: "Too many images",
+      detail
     };
   }
 
@@ -1730,6 +1856,22 @@
     return Array.from(origins);
   }
 
+  function remoteHttpImageSegmentsForMarkdowns(markdowns = [], options = importOptions) {
+    const seen = new Set();
+    const segments = [];
+    for (const markdown of markdowns) {
+      try {
+        for (const segment of remoteHttpImageSegments(parseDraftMarkdown(markdown || "", options))) {
+          const source = String(segment.source || "");
+          if (!source || seen.has(source)) continue;
+          seen.add(source);
+          segments.push(segment);
+        }
+      } catch {}
+    }
+    return segments;
+  }
+
   function pluralizeUnit(count, singular, plural = `${singular}s`) {
     return `${count} ${count === 1 ? singular : plural}`;
   }
@@ -1809,6 +1951,17 @@
   function ensureLatestParsedFromDraft() {
     analyzeDraftNow();
     return latestParsed;
+  }
+
+  function parseMarkdownForWrite(markdown) {
+    const parsed = parseDraftMarkdown(markdown);
+    const counts = shared.segmentCounts(parsed.segments);
+    latestParsed = parsed;
+    latestCounts = counts;
+    syncRemoteImageAccessStatusFromDraft(parsed);
+    updateDraftBrief();
+    syncDraftMediaAlert(mediaUploadEstimate(parsed));
+    return { parsed, counts };
   }
 
   function draftFingerprint(markdown) {
@@ -4025,19 +4178,20 @@
     translateDynamicDom(els.liveRunbookList.closest("section"));
   }
 
-  function buildPreflightChecks() {
-    const parsed = latestParsed;
-    const counts = latestCounts || shared.segmentCounts([]);
+  function buildPreflightChecks(context = {}) {
+    const markdowns = preflightMarkdowns(context);
+    const parsed = preflightParsed(context);
+    const counts = preflightSegmentCounts(context);
     const status = latestPageStatus || {};
     const main = latestDiagnostics?.main || {};
     const vault = status.vault || latestDiagnostics?.vault || {};
     const specialBlocks = (counts.code || 0) + (counts.divider || 0) + (counts.tweet || 0);
     const images = counts.image || 0;
     const tables = counts.table || 0;
-    const remoteImageList = parsed ? remoteHttpImageSegments(parsed) : [];
+    const remoteImageList = markdowns ? remoteHttpImageSegmentsForMarkdowns(markdowns, importOptions) : parsed ? remoteHttpImageSegments(parsed) : [];
     const remoteImages = remoteImageList.length;
-    const remoteOrigins = remoteImageOrigins(parsed);
-    const hasQueue = queueModeActive();
+    const remoteOrigins = markdowns ? remoteImageOriginsForMarkdowns(markdowns, importOptions) : remoteImageOrigins(parsed);
+    const hasQueue = Boolean(markdowns);
     const hasDraft = hasQueue || Boolean(parsed?.segments?.length);
     const targetMissingTone = hasDraft ? "warn" : "error";
     const hasParsedDraft = Boolean(parsed?.segments?.length);
@@ -4048,7 +4202,7 @@
     const contentVersion = latestDiagnostics?.contentScriptVersion || status.contentScriptVersion || CONTENT_VERSION_UNKNOWN;
     const contentVersionReady = !status.isArticleRoute || contentVersion === EXTENSION_VERSION;
     const originalImporter = originalImporterResidueStatus();
-    const localImages = localImageFolderStatus(parsed, vault);
+    const localImages = preflightLocalImageFolderStatus({ markdowns, parsed }, vault);
     const localImageDetail = localImages.absoluteCount
       ? `${localImages.absoluteCount} absolute local image path(s) found. Use paths relative to the selected folder.`
       : localImages.count
@@ -4063,7 +4217,7 @@
         label: "Draft",
         tone: hasDraft ? "ok" : "error",
         detail: hasQueue
-          ? `${draftQueue.length} queued draft${draftQueue.length === 1 ? "" : "s"}`
+          ? `${markdowns.length} queued draft${markdowns.length === 1 ? "" : "s"}`
           : hasParsedDraft
           ? `${parsed.segments.length} publishable block(s), ${parsed.title ? "title detected" : "no title detected"}`
           : "Paste or load Markdown before importing."
@@ -4307,15 +4461,23 @@
     };
   }
 
-  function localAssetWriteBlocker(checks = buildPreflightChecks()) {
+  function localAssetWriteBlocker(checks = buildPreflightChecks(), context = {}) {
     const assets = checks.find((check) => check.id === "assets");
     if (!assets || assets.tone === "ok") return null;
-    const localImages = localImageFolderStatus();
+    const localImages = preflightLocalImageFolderStatus(context);
     if (!localImages.count) return null;
+    const firstReference = localImages.absoluteCount
+      ? localImages.references.find((item) => shared.isAbsoluteLocalImageSource(item.source))
+      : localImages.references[0];
+    const draftIndex = Number.isInteger(firstReference?.draftIndex) ? firstReference.draftIndex : -1;
+    const queueItem = draftIndex >= 0 ? draftQueue[draftIndex] : null;
+    const detail = queueItem
+      ? `${localizeInterpolated("Draft {index}: {title}", { index: draftIndex + 1, title: queueItemDisplayTitle(queueItem) })}. ${assets.detail}`
+      : assets.detail;
     return {
       tone: assets.tone,
       title: localImages.absoluteCount ? "Local image path blocked" : "Local image folder needed",
-      detail: assets.detail,
+      detail,
       action: assets.action || ""
     };
   }
@@ -4334,11 +4496,12 @@
     return { ok: false, error: blocker.detail, localAssets: true };
   }
 
-  function getImportGate(checks) {
+  function getImportGate(checks, context = {}) {
     const byId = new Map(checks.map((check) => [check.id, check]));
-    const requiresBridge = (latestCounts.code || 0) + (latestCounts.divider || 0) + (latestCounts.tweet || 0) > 0;
-    const requiresUploads = (latestCounts.image || 0) + (latestCounts.table || 0) > 0;
-    const requiresAssets = Boolean(localImageFolderStatus().count);
+    const counts = preflightSegmentCounts(context);
+    const requiresBridge = (counts.code || 0) + (counts.divider || 0) + (counts.tweet || 0) > 0;
+    const requiresUploads = (counts.image || 0) + (counts.table || 0) > 0;
+    const requiresAssets = Boolean(preflightLocalImageFolderStatus(context).count);
     const blockers = [
       byId.get("draft")?.tone !== "ok" && "Add a Markdown draft first.",
       byId.get("target")?.tone !== "ok" && "Open or create an X Article draft.",
@@ -5236,7 +5399,7 @@
     els.vaultReady.textContent = localizeText(vault);
   }
 
-  async function prepareSimpleWriteTarget(parsed) {
+  async function prepareSimpleWriteTarget(parsed, preflightContext = { parsed }) {
     const remoteImages = remoteHttpImageSegments(parsed);
     if (remoteImages.length) {
       log(`Preparing ${remoteImages.length} web image(s) for upload. Failed downloads will stay as Markdown links.`);
@@ -5245,7 +5408,7 @@
       syncRemoteImageAccessStatusFromDraft(parsed);
     }
     updatePreflight();
-    let checks = buildPreflightChecks();
+    let checks = buildPreflightChecks(preflightContext);
     const pageScriptCheck = checks.find((check) => check.id === "page-script");
     if (pageScriptCheck?.tone === "error") {
       return { ok: false, reason: pageScriptCheck.detail, checks, targetContext: buildTargetContextEvidence() };
@@ -5258,7 +5421,7 @@
     for (let attempt = 0; attempt < 14; attempt += 1) {
       await delay(attempt < 2 ? 350 : 700);
       await refreshPageState();
-      checks = buildPreflightChecks();
+      checks = buildPreflightChecks(preflightContext);
       const status = latestPageStatus || {};
       const needsDiagnostics = Boolean(status.isArticleRoute && status.hasEditor);
       if (needsDiagnostics) {
@@ -5266,17 +5429,17 @@
         latestDiagnostics = response?.ok ? response : { ok: false, error: response?.error || "Diagnostics unavailable" };
         if (response?.ok) lockTargetContext("write");
         updatePreflight();
-        checks = buildPreflightChecks();
+        checks = buildPreflightChecks(preflightContext);
       }
-      const gate = getImportGate(checks);
+      const gate = getImportGate(checks, preflightContext);
       if (gate.ok || status.isArticleRoute) {
         return { ok: true, checks, gate, targetContext: buildTargetContextEvidence() };
       }
     }
-    checks = buildPreflightChecks();
+    checks = buildPreflightChecks(preflightContext);
     return {
       ok: false,
-      reason: getImportGate(checks).message || "Open or create an X Article, then try Write again.",
+      reason: getImportGate(checks, preflightContext).message || "Open or create an X Article, then try Write again.",
       checks,
       targetContext: buildTargetContextEvidence()
     };
@@ -5294,9 +5457,22 @@
       markDraftQueueMediaStale();
       renderDraftQueue();
     }
-    const parsed = ensureLatestParsedFromDraft();
+    let parsed;
+    let counts;
+    try {
+      ({ parsed, counts } = parseMarkdownForWrite(markdown));
+    } catch (error) {
+      const message = error?.message || MARKDOWN_LOAD_ERROR_DETAIL;
+      log(`Could not analyze draft: ${message}`);
+      showMarkdownLoadError(message);
+      updateWriteButton();
+      activeWriteQueueItemId = null;
+      resetQueueItemWritingState(queueItemId);
+      return { ok: false, error: message, parse: true };
+    }
+    const preflightContext = { parsed, counts };
     updatePreflight();
-    const localAssetBlocker = localAssetWriteBlocker(buildPreflightChecks());
+    const localAssetBlocker = localAssetWriteBlocker(buildPreflightChecks(preflightContext), preflightContext);
     if (localAssetBlocker) {
       return handleLocalAssetWriteBlocker(localAssetBlocker, { queueItemId });
     }
@@ -5328,7 +5504,7 @@
       resetQueueItemWritingState(queueItemId);
       return { ok: false, error: message, mediaLimit: true };
     }
-    const target = await prepareSimpleWriteTarget(parsed);
+    const target = await prepareSimpleWriteTarget(parsed, preflightContext);
     if (!target.ok) {
       log(target.reason || "Could not prepare X Article.");
       captureEvidence("preflight-blocked", {
@@ -5376,7 +5552,9 @@
       renderRunSummary(response.summary);
       captureEvidence("import", { result: response, targetContext: target.targetContext, pageStatus: latestPageStatus, diagnostics: latestDiagnostics });
       markActiveQueueItemWritten();
-      triggerSuccessFeedback(response.summary);
+      if (!batch || draftQueue.length === 0) {
+        triggerSuccessFeedback(response.summary);
+      }
     } else {
       log(`Import failed: ${response?.error || "unknown error"}`);
       if (response?.cancelled) {
@@ -5423,6 +5601,23 @@
     batchWriting = true;
     updateWriteButton();
     try {
+      const markdowns = draftQueueMarkdowns();
+      const preflightContext = { markdowns };
+      updatePreflight();
+      const checks = buildPreflightChecks(preflightContext);
+      const localAssetBlocker = localAssetWriteBlocker(checks, preflightContext);
+      if (localAssetBlocker) {
+        return await handleLocalAssetWriteBlocker(localAssetBlocker, { chooseWhenAvailable: true });
+      }
+      const mediaBlocker = firstQueueMediaLimitBlocker(mediaUploadEstimateForMarkdowns(markdowns, importOptions));
+      if (mediaBlocker) {
+        const message = mediaBlocker.detail;
+        log(message);
+        if (mediaBlocker.item?.id) loadQueueItem(mediaBlocker.item.id, { persist: false, remember: false });
+        setDraftDropStatus(mediaBlocker.title, message, "error");
+        recordLiveProgressEvent("preflight-blocked", { text: message, error: message, level: "warn", mediaLimit: true });
+        return { ok: false, error: message, mediaLimit: true };
+      }
       const origins = remoteImageOriginsForMarkdowns(draftQueue.map((item) => item.markdown), importOptions);
       if (origins.length) {
         const permission = await requestRemoteImageAccessForOrigins(origins, latestParsed);
@@ -5757,6 +5952,13 @@
     if (!els.draftPanel) return;
     let dragActive = false;
     let dragCancelled = false;
+    const dropPayloadFromTransfer = (dataTransfer) => {
+      const markdownFiles = markdownFilesFrom(dataTransfer?.files);
+      return {
+        markdownFiles,
+        text: markdownFiles.length ? "" : markdownTextFromTransfer(dataTransfer)
+      };
+    };
     const activateDropzone = () => {
       if (dragCancelled) return;
       showWorkspacePanel("draft");
@@ -5813,6 +6015,8 @@
     }, true);
     document.addEventListener("drop", async (event) => {
       if (!hasMarkdownTransfer(event.dataTransfer)) return;
+      const { markdownFiles, text } = dropPayloadFromTransfer(event.dataTransfer);
+      if (!markdownFiles.length && !text) return;
       event.preventDefault();
       event.stopPropagation();
       if (dragCancelled) {
@@ -5824,13 +6028,11 @@
       dragCancelled = false;
       deactivateDropzone();
       setDraftDropStatus("Reading Markdown...", "Reading dropped Markdown.", "ready");
-      const markdownFiles = markdownFilesFrom(event.dataTransfer.files);
       if (markdownFiles.length > 1) {
         await queueMarkdownFiles(markdownFiles, "drop-file");
       } else if (markdownFiles[0]) {
         await loadMarkdownFileIntoDraft(markdownFiles[0], "drop-file");
       } else {
-        const text = markdownTextFromTransfer(event.dataTransfer);
         if (text) {
           if (queueModeActive()) {
             addDraftToQueue(text, {
