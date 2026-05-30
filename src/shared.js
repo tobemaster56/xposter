@@ -124,11 +124,32 @@
     return { body: normalized.slice(match[0].length).trim(), meta };
   }
 
+  function markdownTitleCandidate(value) {
+    return String(value || "").replace(/\s+/g, " ").trim();
+  }
+
+  function markdownTitleCandidateFromFileName(fileName) {
+    const raw = String(fileName || "").trim();
+    if (!raw) return "";
+    const name = raw.split(/[?#]/)[0].split(/[\\/]/).filter(Boolean).pop() || raw;
+    const stem = name.replace(/\.(md|markdown|mdown|mkd|txt)$/i, "");
+    return markdownTitleCandidate(stem);
+  }
+
+  function markdownTitleCandidateFromOptions(options = {}) {
+    const explicit = markdownTitleCandidate(
+      options.titleCandidate || options.fallbackTitle || options.sourceTitle || ""
+    );
+    if (explicit) return explicit;
+    return markdownTitleCandidateFromFileName(options.sourceFileName || options.fileName || "");
+  }
+
   function parseMarkdown(markdown, options = {}) {
     const extractTitle = options.extractTitle !== false && options.setTitle !== false;
     const extractCover = options.extractCover !== false && options.setCover !== false;
     const { body, meta } = parseFrontmatter(markdown);
     const titleFromMeta = meta.title || meta.Title || meta["标题"] || null;
+    const titleCandidate = extractTitle ? markdownTitleCandidateFromOptions(options) : "";
     let cover = extractCover ? meta.cover || meta.Cover || meta["封面"] || null : null;
     if (cover) {
       cover = cover
@@ -150,14 +171,20 @@
     if (cursor < body.length) segments.push(...parseTextBlocks(body.slice(cursor)));
 
     let title = extractTitle ? titleFromMeta : null;
+    let titleSource = title ? "frontmatter" : "";
     if (extractTitle && !title) {
       const titleIndex = segments.findIndex(
         (segment) => segment.type === "text" && segment.kind === "header-one"
       );
       if (titleIndex >= 0) {
         title = segments[titleIndex].text || null;
+        titleSource = title ? "heading" : "";
         segments.splice(titleIndex, 1);
       }
+    }
+    if (extractTitle && !title && titleCandidate) {
+      title = titleCandidate;
+      titleSource = "candidate";
     }
 
     if (extractCover && !cover) {
@@ -169,7 +196,9 @@
       cover,
       segments,
       meta,
-      titleFromMeta: Boolean(extractTitle && titleFromMeta)
+      titleFromMeta: Boolean(extractTitle && titleFromMeta),
+      titleFromCandidate: Boolean(extractTitle && titleSource === "candidate"),
+      titleSource
     };
   }
 
@@ -1118,6 +1147,8 @@
   const api = {
     looksLikeMarkdown,
     parseMarkdown,
+    markdownTitleCandidate,
+    markdownTitleCandidateFromFileName,
     segmentCounts,
     applyLimits,
     buildPastePlan,

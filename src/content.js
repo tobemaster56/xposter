@@ -64,6 +64,9 @@
     "Could not export Markdown": "无法导出 Markdown",
     "Copy Markdown": "复制 Markdown",
     "Download Markdown": "下载 Markdown",
+    "Copy MD": "复制 MD",
+    "Download MD": "下载 MD",
+    "Export Markdown": "导出 Markdown",
     "Markdown": "Markdown",
     "MD": "MD",
     "Markdown export action": "Markdown 导出操作",
@@ -83,6 +86,9 @@
     "Release over this area to send them to the side panel.": "在这个区域松开后发送到侧边栏。",
     "Connect image folder": "连接图片文件夹",
     "Release here to link local images for this article.": "在这里松开，为这篇文章关联本地图片。",
+    "Drop image folder here": "把图片文件夹放到这里",
+    "Release to connect this folder for local images.": "松开后连接这个文件夹，用于读取本地图片。",
+    "Drop the folder into the blue folder area.": "请把文件夹拖到蓝色投放区。",
     "Add image to article": "添加图片到文章",
     "Release over the editor to upload through X.": "在编辑器上松开，通过 X 上传。",
     "Insert image at cursor": "在光标处插入图片",
@@ -102,6 +108,8 @@
     "Saving Markdown drafts for the side panel.": "正在为侧边栏保存 Markdown 草稿。",
     "Connecting folder...": "正在连接文件夹...",
     "Checking local image access.": "正在检查本地图片访问权限。",
+    "Connecting image folder...": "正在连接图片文件夹...",
+    "Preparing local image access.": "正在准备本地图片访问权限。",
     "Adding image...": "正在添加图片...",
     "Handing the image to X's uploader.": "正在交给 X 上传图片。",
     "Using the current article cursor.": "将使用当前正文光标位置。",
@@ -172,9 +180,9 @@
       enabled: true,
       mode: "copy",
       root: null,
-      documentListenersInstalled: false,
       syncTimer: 0,
-      feedbackTimer: 0
+      feedbackTimer: 0,
+      inlineFeedbackTimer: 0
     }
   };
 
@@ -203,10 +211,26 @@
     }
   }
 
+  function normalizeSourceFileName(value) {
+    return String(value || "").trim();
+  }
+
+  function titleCandidateOptions(options = {}) {
+    const titleCandidate = shared.markdownTitleCandidate?.(
+      options.titleCandidate || options.fallbackTitle || options.sourceTitle || ""
+    ) || "";
+    const sourceFileName = normalizeSourceFileName(options.sourceFileName || options.fileName);
+    const normalized = {};
+    if (titleCandidate) normalized.titleCandidate = titleCandidate;
+    if (sourceFileName) normalized.sourceFileName = sourceFileName;
+    return normalized;
+  }
+
   function normalizeImportOptions(options = {}) {
     return {
       setTitle: options.setTitle !== false,
-      setCover: options.setCover !== false
+      setCover: options.setCover !== false,
+      ...titleCandidateOptions(options)
     };
   }
 
@@ -350,6 +374,10 @@
 
   function articleExportLabel(mode) {
     return translateContentText(mode === "download" ? "Download Markdown" : "Copy Markdown");
+  }
+
+  function articleExportShortLabel(mode) {
+    return translateContentText(mode === "download" ? "Download MD" : "Copy MD");
   }
 
   function truncateText(text, maxLength) {
@@ -1722,10 +1750,10 @@
   async function importFile(file, origin = "file") {
     const text = await readMarkdownFile(file);
     await ensureEditorReadyForFileImport();
-    return importMarkdown(text, origin);
+    return importMarkdown(text, origin, { sourceFileName: file.name || "" });
   }
 
-  async function openArticlePageForPendingImport(markdown = "", source = "drop") {
+  async function openArticlePageForPendingImport(markdown = "", source = "drop", options = {}) {
     const result = await safeRuntimeSendMessage({ type: "xposter:open-articles" }).catch((error) => ({
       ok: false,
       error: error?.message || String(error)
@@ -1738,7 +1766,8 @@
     }
     await ensureEditorReadyForFileImport();
     const pending = await takePendingArticleImport();
-    return importMarkdown(pending?.markdown || markdown, pending?.source || source);
+    const pendingSourceFileName = pending?.fileName || options.sourceFileName || options.fileName || "";
+    return importMarkdown(pending?.markdown || markdown, pending?.source || source, { sourceFileName: pendingSourceFileName });
   }
 
   async function stageSingleMarkdownForArticle(markdown, { fileName = "", source = "drop" } = {}) {
@@ -1747,7 +1776,8 @@
       showStatus("Drop a Markdown file or Markdown text.", "warn", 5000);
       return { ok: false, error: "No Markdown content" };
     }
-    const preflight = preflightArticleMediaLimit(text);
+    const sourceFileName = normalizeSourceFileName(fileName);
+    const preflight = preflightArticleMediaLimit(text, { sourceFileName });
     if (!preflight.ok) {
       showStatus(preflight.error, "warn", 9000);
       broadcast({
@@ -1770,14 +1800,14 @@
     try {
       if (!stored) {
         await ensureEditorReadyForFileImport();
-        return importMarkdown(text, source);
+        return importMarkdown(text, source, { sourceFileName });
       }
       if (isArticleRoute()) {
         await ensureEditorReadyForFileImport();
         const pending = await takePendingArticleImport();
-        return importMarkdown(pending?.markdown || text, source);
+        return importMarkdown(pending?.markdown || text, pending?.source || source, { sourceFileName: pending?.fileName || sourceFileName });
       }
-      return openArticlePageForPendingImport(text, source);
+      return openArticlePageForPendingImport(text, source, { sourceFileName });
     } catch (error) {
       if (isArticleRoute()) await discardPendingArticleImport();
       showStatus(error?.message || "Could not open X Article", "error", 7000);
@@ -1796,7 +1826,8 @@
     if (!pending?.markdown) return;
     showStatus("Opening X Article...", "work");
     try {
-      const preflight = preflightArticleMediaLimit(pending.markdown);
+      const sourceFileName = normalizeSourceFileName(pending.fileName);
+      const preflight = preflightArticleMediaLimit(pending.markdown, { sourceFileName });
       if (!preflight.ok) {
         await discardPendingArticleImport();
         showStatus(preflight.error, "warn", 9000);
@@ -1817,7 +1848,9 @@
       }
       await ensureEditorReadyForFileImport();
       const stored = await takePendingArticleImport();
-      await importMarkdown(stored?.markdown || pending.markdown, pending.source || "drop");
+      await importMarkdown(stored?.markdown || pending.markdown, stored?.source || pending.source || "drop", {
+        sourceFileName: stored?.fileName || sourceFileName
+      });
     } catch (error) {
       showStatus(error?.message || "Could not write dropped Markdown", "error", 7000);
     }
@@ -1829,7 +1862,7 @@
 
   function markdownTitleForQueue(markdown, fallback = "Untitled Markdown") {
     try {
-      const parsed = shared.parseMarkdown(markdown || "");
+      const parsed = shared.parseMarkdown(markdown || "", { sourceFileName: fallback });
       if (parsed?.title) return parsed.title;
     } catch {}
     const heading = String(markdown || "").match(/^\s*#\s+(.+)$/m)?.[1]?.trim();
@@ -1923,7 +1956,7 @@
   }
 
   function imageFilesFromTransfer(dataTransfer) {
-    return Array.from(dataTransfer?.files || []).filter(isImageFile);
+    return transferFilesFromDataTransfer(dataTransfer).filter(isImageFile);
   }
 
   function safeTransferData(dataTransfer, type) {
@@ -2237,9 +2270,11 @@
     if (!root) return;
     root.dataset.articleTitle = article.title || "";
     root.dataset.articleMarkdown = article.markdown;
-    root.dataset.articleFileName = articleFileName(article.title);
+    root.dataset.articleFileName = article.fileName || articleFileName(article.title);
+    root.dataset.articleCharacterCount = String(article.characterCount || 0);
+    root.dataset.articleImageCount = String(article.imageCount || 0);
     root.dataset.mode = normalizeArticleExportMode(state.articleExport.mode);
-    root.style.setProperty("--__xposter-article-export-inline-end", `${articleDockInlineEnd(article.container)}px`);
+    placeArticleExportRoot(root, article);
     updateArticleExportButtonMode();
   }
 
@@ -2255,27 +2290,20 @@
       root = document.createElement("div");
       root.id = ARTICLE_EXPORT_ID;
       root.dataset.motion = "entered";
+      root.setAttribute("role", "group");
+      root.setAttribute("aria-label", translateContentText("Export Markdown"));
       root.innerHTML = `
-        <button class="__xposter_article_export_main" type="button"></button>
-        <button class="__xposter_article_export_toggle" type="button" aria-haspopup="menu" aria-expanded="false">▾</button>
-        <div class="__xposter_article_export_menu" role="menu" hidden>
-          <button type="button" role="menuitem" data-export-mode="copy"></button>
-          <button type="button" role="menuitem" data-export-mode="download"></button>
+        <div class="__xposter_article_export_actions">
+          <button class="__xposter_article_export_action" type="button" data-export-action="copy"></button>
+          <button class="__xposter_article_export_action" type="button" data-export-action="download"></button>
         </div>
+        <span class="__xposter_article_export_feedback" aria-live="polite"></span>
       `;
-      root.querySelector(".__xposter_article_export_main")?.addEventListener("click", handleArticleExportMainClick);
-      root.querySelector(".__xposter_article_export_toggle")?.addEventListener("click", toggleArticleExportMenu);
-      root.querySelector(".__xposter_article_export_menu")?.addEventListener("click", handleArticleExportMenuClick);
-      if (!state.articleExport.documentListenersInstalled) {
-        document.addEventListener("click", closeArticleExportMenuOnOutside, true);
-        document.addEventListener("keydown", closeArticleExportMenuOnKeydown, true);
-        state.articleExport.documentListenersInstalled = true;
-      }
+      root.addEventListener("click", handleArticleExportActionClick);
       window.setTimeout(() => {
         if (root.isConnected && root.dataset.motion === "entered") delete root.dataset.motion;
       }, 320);
     }
-    if (root.parentElement !== document.body) document.body.appendChild(root);
     state.articleExport.root = root;
     return root;
   }
@@ -2283,52 +2311,58 @@
   function updateArticleExportButtonMode() {
     const root = document.getElementById(ARTICLE_EXPORT_ID);
     if (!root) return;
+    root.setAttribute("aria-label", translateContentText("Export Markdown"));
     const mode = normalizeArticleExportMode(state.articleExport.mode);
     root.dataset.mode = mode;
-    const main = root.querySelector(".__xposter_article_export_main");
-    const title = articleExportLabel(mode);
-    if (main) {
-      main.textContent = translateContentText("Markdown");
-      main.title = title;
-      main.setAttribute("aria-label", title);
-    }
-    const toggle = root.querySelector(".__xposter_article_export_toggle");
-    if (toggle) toggle.setAttribute("aria-label", translateContentText("Markdown export action"));
-    root.querySelectorAll("[data-export-mode]").forEach((button) => {
-      button.setAttribute("aria-checked", String(button.dataset.exportMode === mode));
-      button.textContent = articleExportLabel(button.dataset.exportMode);
+    root.querySelectorAll("[data-export-action]").forEach((button) => {
+      const buttonMode = normalizeArticleExportMode(button.dataset.exportAction);
+      const title = articleExportLabel(buttonMode);
+      button.dataset.active = String(buttonMode === mode);
+      button.textContent = articleExportShortLabel(buttonMode);
+      button.title = title;
+      button.setAttribute("aria-label", title);
     });
   }
 
-  async function handleArticleExportMainClick() {
+  async function handleArticleExportActionClick(event) {
+    const button = event.target.closest("[data-export-action]");
+    if (!button) return;
+    event.preventDefault();
+    event.stopPropagation();
+    await handleArticleExportAction(button.dataset.exportAction);
+  }
+
+  async function handleArticleExportAction(action) {
     const root = document.getElementById(ARTICLE_EXPORT_ID);
     const article = articleExportPayload(root);
+    const mode = normalizeArticleExportMode(action || state.articleExport.mode);
+    await setArticleExportMode(mode);
     if (!article.markdown) {
       signalArticleExportFeedback(root, "warn");
       transientStatus("No readable article text found.", "warn", 3500);
       return;
     }
     try {
-      if (normalizeArticleExportMode(state.articleExport.mode) === "download") {
+      if (mode === "download") {
         downloadMarkdown(article.markdown, article.fileName);
-        transientStatus("Markdown saved.", "export", 3000);
+        notifyArticleExportSuccess(root, "download", article);
       } else {
         await copyText(article.markdown);
-        transientStatus("Markdown copied.", "export", 3000);
+        notifyArticleExportSuccess(root, "copy", article);
       }
       signalArticleExportFeedback(root, "done");
     } catch (error) {
       signalArticleExportFeedback(root, "error");
       transientStatus(error?.message || "Could not export Markdown", "error", 5000);
-    } finally {
-      closeArticleExportMenu();
     }
   }
 
   function articleExportPayload(root) {
     return {
       markdown: String(root?.dataset.articleMarkdown || ""),
-      fileName: root?.dataset.articleFileName || articleFileName(root?.dataset.articleTitle || "")
+      fileName: root?.dataset.articleFileName || articleFileName(root?.dataset.articleTitle || ""),
+      characterCount: Number(root?.dataset.articleCharacterCount || 0) || markdownCharacterCount(root?.dataset.articleMarkdown || ""),
+      imageCount: Number(root?.dataset.articleImageCount || 0) || markdownImageCount(root?.dataset.articleMarkdown || "")
     };
   }
 
@@ -2349,26 +2383,75 @@
     window.setTimeout(() => URL.revokeObjectURL(url), 1200);
   }
 
-  function toggleArticleExportMenu(event) {
-    event.preventDefault();
-    event.stopPropagation();
-    const root = document.getElementById(ARTICLE_EXPORT_ID);
-    const menu = root?.querySelector(".__xposter_article_export_menu");
-    const toggle = root?.querySelector(".__xposter_article_export_toggle");
-    if (!menu || !toggle) return;
-    const open = menu.hidden;
-    menu.hidden = !open;
-    toggle.setAttribute("aria-expanded", String(open));
-    if (open) menu.querySelector("[aria-checked='true'], button")?.focus?.();
+  function notifyArticleExportSuccess(root, mode, article) {
+    const message = articleExportSuccessText(mode, article);
+    setArticleExportInlineFeedback(root, message, "done");
+    transientStatus(message, "export", 4200);
   }
 
-  async function handleArticleExportMenuClick(event) {
-    const button = event.target.closest("[data-export-mode]");
-    if (!button) return;
-    event.preventDefault();
-    await setArticleExportMode(button.dataset.exportMode);
-    signalArticleExportFeedback(document.getElementById(ARTICLE_EXPORT_ID), "mode");
-    closeArticleExportMenu();
+  function articleExportSuccessText(mode, article) {
+    const fileName = article.fileName || articleFileName("");
+    const characters = formatContentNumber(article.characterCount || markdownCharacterCount(article.markdown));
+    const images = formatContentNumber(article.imageCount || markdownImageCount(article.markdown));
+    if (isChineseLanguage()) {
+      return `${mode === "download" ? "已下载" : "已复制"} ${fileName}，${characters} 个字符，${images} 张图片。`;
+    }
+    return `${mode === "download" ? "Downloaded" : "Copied"} ${fileName}, ${characters} characters, ${images} images.`;
+  }
+
+  function formatContentNumber(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number.toLocaleString(isChineseLanguage() ? "zh-CN" : "en-US") : "0";
+  }
+
+  function setArticleExportInlineFeedback(root, message, tone = "done", timeout = 4200) {
+    if (!root) return;
+    const feedback = root.querySelector(".__xposter_article_export_feedback");
+    if (!feedback) return;
+    window.clearTimeout(state.articleExport.inlineFeedbackTimer);
+    feedback.textContent = message;
+    feedback.hidden = false;
+    root.dataset.inlineFeedback = tone;
+    state.articleExport.inlineFeedbackTimer = window.setTimeout(() => {
+      if (!root.isConnected || root.dataset.inlineFeedback !== tone) return;
+      feedback.hidden = true;
+      feedback.textContent = "";
+      delete root.dataset.inlineFeedback;
+    }, timeout);
+  }
+
+  function markdownCharacterCount(markdown) {
+    return normalizeText(String(markdown || "")
+      .replace(/!\[[^\]]*]\([^)]*\)/g, " ")
+      .replace(/\[([^\]]+)]\([^)]*\)/g, "$1")
+      .replace(/^#{1,6}\s+/gm, "")
+      .replace(/^>\s?/gm, "")
+      .replace(/[`*_~\\]/g, "")
+      .replace(/^-{3,}$/gm, " "))
+      .length;
+  }
+
+  function markdownImageCount(markdown) {
+    return (String(markdown || "").match(/!\[[^\]]*]\([^)]*\)/g) || []).length;
+  }
+
+  function placeArticleExportRoot(root, article) {
+    const anchor = article?.titleNode || articleTitleAnchor(article?.container);
+    if (anchor?.parentElement) {
+      if (anchor.nextSibling !== root) anchor.parentElement.insertBefore(root, anchor.nextSibling);
+      root.dataset.placement = "inline";
+      root.style.removeProperty("--__xposter-article-export-inline-end");
+      return;
+    }
+    if (root.parentElement !== document.body) document.body.appendChild(root);
+    root.dataset.placement = "fixed";
+    root.style.setProperty("--__xposter-article-export-inline-end", `${articleDockInlineEnd(article?.container)}px`);
+  }
+
+  function articleTitleAnchor(container) {
+    return detectArticleExportTitleNode(container) ||
+      Array.from(container?.querySelectorAll?.("h1, h2, [role='heading'], [data-testid='twitter-article-title']") || [])
+        .find((node) => normalizeText(node.innerText || node.textContent || ""));
   }
 
   function signalArticleExportFeedback(root, tone = "done") {
@@ -2380,24 +2463,6 @@
     state.articleExport.feedbackTimer = window.setTimeout(() => {
       if (root.isConnected && root.dataset.feedback === tone) delete root.dataset.feedback;
     }, 900);
-  }
-
-  function closeArticleExportMenu() {
-    const root = document.getElementById(ARTICLE_EXPORT_ID);
-    const menu = root?.querySelector(".__xposter_article_export_menu");
-    const toggle = root?.querySelector(".__xposter_article_export_toggle");
-    if (menu) menu.hidden = true;
-    if (toggle) toggle.setAttribute("aria-expanded", "false");
-  }
-
-  function closeArticleExportMenuOnOutside(event) {
-    const root = document.getElementById(ARTICLE_EXPORT_ID);
-    if (!root || root.contains(event.target)) return;
-    closeArticleExportMenu();
-  }
-
-  function closeArticleExportMenuOnKeydown(event) {
-    if (event.key === "Escape") closeArticleExportMenu();
   }
 
   function extractReadableXArticle() {
@@ -2425,21 +2490,28 @@
     const container = articleExportContainer(element);
     if (!container || container.closest(`#${ARTICLE_EXPORT_ID}`)) return null;
     if (!containerHasReadableArticleSignal(container)) return null;
-    const parts = articleMarkdownParts(container);
-    const title = detectArticleExportTitle(container, parts);
+    const titleNode = detectArticleExportTitleNode(container);
+    const parts = removeDuplicateArticleTitleParts(
+      articleMarkdownParts(container, { titleNode }),
+      detectArticleExportTitle(container, [], titleNode)
+    );
+    const title = detectArticleExportTitle(container, parts, titleNode);
     const markdown = normalizeMarkdownLines([
       title ? `# ${escapeMarkdownInline(title)}` : "",
-      ...parts.filter((part) => normalizeText(part).toLowerCase() !== normalizeText(title).toLowerCase())
+      ...removeDuplicateArticleTitleParts(parts, title)
     ]);
     const textLength = normalizeText(markdown).length;
     if (textLength < 180 && parts.length < 3) return null;
     return {
       container,
+      titleNode,
       title,
       markdown,
       parts,
       textLength,
-      imageCount: (markdown.match(/^!\[/gm) || []).length,
+      fileName: articleFileName(title),
+      characterCount: markdownCharacterCount(markdown),
+      imageCount: markdownImageCount(markdown),
       linkCount: (markdown.match(/\]\(https?:\/\//g) || []).length
     };
   }
@@ -2500,18 +2572,43 @@
       (candidate.title ? 8 : 0);
   }
 
-  function detectArticleExportTitle(container, parts = []) {
-    const heading = Array.from(container.querySelectorAll("h1, h2, [role='heading']"))
-      .map((node) => normalizeText(node.innerText || node.textContent || ""))
-      .find((text) => text && !/^post$|^article$/i.test(text));
-    if (heading) return heading;
+  function detectArticleExportTitleNode(container) {
+    return Array.from(container?.querySelectorAll?.("h1, h2, [role='heading'], [data-testid='twitter-article-title']") || [])
+      .find((node) => {
+        if (node.closest?.(`#${ARTICLE_EXPORT_ID}, [role='button'], button, nav, time`)) return false;
+        const text = normalizeText(node.innerText || node.textContent || "");
+        return text && !/^post$|^article$/i.test(text);
+      }) || null;
+  }
+
+  function detectArticleExportTitle(container, parts = [], titleNode = null) {
+    const heading = normalizeText(titleNode?.innerText || titleNode?.textContent || "");
+    if (heading && !/^post$|^article$/i.test(heading)) return heading;
     const first = normalizeText(parts.find((part) => part && !part.startsWith("![")) || "");
     if (first && first.length <= 140) return first.replace(/^#+\s*/, "");
     const title = normalizeText(document.title || "").replace(/\s*[\|/].*$/, "").replace(/\s+on X$/, "");
     return title && !/^x$/i.test(title) ? title : "";
   }
 
-  function articleMarkdownParts(root) {
+  function removeDuplicateArticleTitleParts(parts = [], title = "") {
+    if (!title) return parts;
+    return parts.filter((part) => !articleMarkdownPartMatchesTitle(part, title));
+  }
+
+  function articleMarkdownPartMatchesTitle(part, title) {
+    return normalizedArticleTitleText(part) === normalizedArticleTitleText(title);
+  }
+
+  function normalizedArticleTitleText(value) {
+    return normalizeText(String(value || "")
+      .replace(/^#{1,6}\s+/, "")
+      .replace(/^\[([^\]]+)]\([^)]+\)$/, "$1")
+      .replace(/\\([\\`*_[\]])/g, "$1")
+      .replace(/[`*_]/g, ""))
+      .toLowerCase();
+  }
+
+  function articleMarkdownParts(root, { titleNode = null } = {}) {
     const parts = [];
     const seen = new Set();
     const selector = "h1, h2, h3, h4, h5, h6, p, blockquote, pre, ul, ol, img, figcaption, [data-testid='tweetText'], div[lang]";
@@ -2521,7 +2618,9 @@
     ];
     for (const node of nodes) {
       if (node.closest?.(`#${ARTICLE_EXPORT_ID}, [role='button'], button, nav, time, [aria-label*='analytics' i]`)) continue;
-      if (nodes.some((other) => other !== node && other.contains(node) && markdownNodeConsumesChildren(other))) continue;
+      if (titleNode && (node === titleNode || titleNode.contains(node))) continue;
+      if (nodes.some((other) => other !== node && other.contains(node) && markdownNodeConsumesChildren(other, titleNode))) continue;
+      if (titleNode && node.contains?.(titleNode)) continue;
       const part = markdownForArticleNode(node);
       const key = normalizeText(part);
       if (!part || !key || seen.has(key)) continue;
@@ -2531,7 +2630,8 @@
     return parts;
   }
 
-  function markdownNodeConsumesChildren(node) {
+  function markdownNodeConsumesChildren(node, skippedNode = null) {
+    if (skippedNode && node.contains?.(skippedNode)) return false;
     const tag = node.tagName?.toLowerCase() || "";
     return tag === "blockquote" || tag === "pre" || tag === "ul" || tag === "ol" || node.matches?.("[data-testid='tweetText'], div[lang]");
   }
@@ -2689,144 +2789,136 @@
         --__xposter-export-muted: #536471;
         --__xposter-export-line: #cfd9de;
         --__xposter-export-signal: #1d9bf0;
+        --__xposter-export-ok: #00ba7c;
         --__xposter-export-danger: #f4212e;
+        position: static;
+        z-index: auto;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        width: fit-content;
+        max-width: min(100%, 720px);
+        margin: 10px 0 18px;
+        color: var(--__xposter-export-ink);
+        transform: translateZ(0);
+        font: 12px/1 ui-sans-serif, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif;
+        letter-spacing: 0;
+      }
+      #${ARTICLE_EXPORT_ID}[data-placement="fixed"] {
         position: fixed;
         right: var(--__xposter-article-export-inline-end, 24px);
         bottom: 24px;
         z-index: 2147483645;
-        display: inline-flex;
-        align-items: center;
-        min-height: 38px;
-        border: 1px solid var(--__xposter-export-line);
-        background: var(--__xposter-export-paper);
-        color: var(--__xposter-export-ink);
-        box-shadow: 0 8px 22px rgba(15, 20, 25, 0.10);
-        opacity: 0.86;
-        transform: translateZ(0);
+        max-width: min(360px, calc(100vw - 24px));
+        margin: 0;
+        opacity: 0.88;
         transform-origin: 100% 100%;
-        transition:
-          opacity 160ms cubic-bezier(0.25, 1, 0.5, 1),
-          border-color 160ms cubic-bezier(0.25, 1, 0.5, 1),
-          background 160ms cubic-bezier(0.25, 1, 0.5, 1),
-          box-shadow 180ms cubic-bezier(0.25, 1, 0.5, 1),
-          transform 160ms cubic-bezier(0.25, 1, 0.5, 1);
-        font: 12px/1 ui-sans-serif, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif;
-        letter-spacing: 0;
       }
       #${ARTICLE_EXPORT_ID}[data-motion="entered"] {
         animation: __xposter_article_export_in 260ms cubic-bezier(0.22, 1, 0.36, 1);
       }
-      #${ARTICLE_EXPORT_ID}:hover,
-      #${ARTICLE_EXPORT_ID}:focus-within {
+      #${ARTICLE_EXPORT_ID}[data-feedback="done"],
+      #${ARTICLE_EXPORT_ID}[data-feedback="mode"] {
+        animation: __xposter_article_export_confirm 420ms cubic-bezier(0.22, 1, 0.36, 1);
+      }
+      #${ARTICLE_EXPORT_ID}[data-feedback="warn"],
+      #${ARTICLE_EXPORT_ID}[data-feedback="error"] {
+        animation: __xposter_article_export_confirm 420ms cubic-bezier(0.22, 1, 0.36, 1);
+      }
+      #${ARTICLE_EXPORT_ID} .__xposter_article_export_actions {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        min-height: 28px;
+      }
+      #${ARTICLE_EXPORT_ID} button {
+        min-height: 28px;
+        padding: 0 10px;
+        border: 1px solid var(--__xposter-export-line);
+        background: color-mix(in oklch, var(--__xposter-export-paper), transparent 2%);
+        color: var(--__xposter-export-muted);
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+        white-space: nowrap;
+        transition:
+          border-color 140ms cubic-bezier(0.25, 1, 0.5, 1),
+          background-color 140ms cubic-bezier(0.25, 1, 0.5, 1),
+          color 140ms cubic-bezier(0.25, 1, 0.5, 1),
+          transform 140ms cubic-bezier(0.25, 1, 0.5, 1);
+      }
+      #${ARTICLE_EXPORT_ID} button:hover,
+      #${ARTICLE_EXPORT_ID} button:focus-visible {
+        outline: none;
+        border-color: color-mix(in oklch, var(--__xposter-export-signal), var(--__xposter-export-line) 26%);
+        background: color-mix(in oklch, var(--__xposter-export-signal), var(--__xposter-export-paper) 94%);
+        color: var(--__xposter-export-ink);
+        transform: translateY(-1px);
+      }
+      #${ARTICLE_EXPORT_ID} button:active {
+        transform: translateY(0) scale(0.985);
+      }
+      #${ARTICLE_EXPORT_ID} button[data-active="true"] {
+        border-color: color-mix(in oklch, var(--__xposter-export-signal), var(--__xposter-export-line) 34%);
+        background: color-mix(in oklch, var(--__xposter-export-signal), var(--__xposter-export-paper) 91%);
+        color: var(--__xposter-export-ink);
+      }
+      #${ARTICLE_EXPORT_ID} .__xposter_article_export_feedback {
+        max-width: min(100%, 460px);
+        color: var(--__xposter-export-muted);
+        font-size: 12px;
+        line-height: 1.35;
+      }
+      #${ARTICLE_EXPORT_ID} .__xposter_article_export_feedback:empty,
+      #${ARTICLE_EXPORT_ID} .__xposter_article_export_feedback[hidden] {
+        display: none;
+      }
+      #${ARTICLE_EXPORT_ID}[data-inline-feedback="done"] .__xposter_article_export_feedback {
+        color: color-mix(in oklch, var(--__xposter-export-ok), var(--__xposter-export-ink) 20%);
+      }
+      #${ARTICLE_EXPORT_ID}[data-inline-feedback="warn"] .__xposter_article_export_feedback,
+      #${ARTICLE_EXPORT_ID}[data-inline-feedback="error"] .__xposter_article_export_feedback {
+        color: var(--__xposter-export-danger);
+      }
+      #${ARTICLE_EXPORT_ID}[data-placement="fixed"] {
+        padding: 6px;
+        border: 1px solid var(--__xposter-export-line);
+        background: var(--__xposter-export-paper);
+        box-shadow: 0 8px 22px rgba(15, 20, 25, 0.10);
+      }
+      #${ARTICLE_EXPORT_ID}[data-placement="fixed"]:hover,
+      #${ARTICLE_EXPORT_ID}[data-placement="fixed"]:focus-within {
         opacity: 1;
         border-color: color-mix(in oklch, var(--__xposter-export-line), var(--__xposter-export-ink) 28%);
         background: color-mix(in oklch, var(--__xposter-export-paper-2), var(--__xposter-export-paper) 54%);
         box-shadow: 0 12px 28px rgba(15, 20, 25, 0.13);
         transform: translate3d(0, -1px, 0);
       }
-      #${ARTICLE_EXPORT_ID}[data-feedback="done"],
-      #${ARTICLE_EXPORT_ID}[data-feedback="mode"] {
-        border-color: color-mix(in oklch, var(--__xposter-export-signal), var(--__xposter-export-line) 30%);
-        animation: __xposter_article_export_confirm 420ms cubic-bezier(0.22, 1, 0.36, 1);
-      }
-      #${ARTICLE_EXPORT_ID}[data-feedback="warn"],
-      #${ARTICLE_EXPORT_ID}[data-feedback="error"] {
-        border-color: color-mix(in oklch, var(--__xposter-export-danger), var(--__xposter-export-line) 28%);
-        animation: __xposter_article_export_confirm 420ms cubic-bezier(0.22, 1, 0.36, 1);
-      }
-      #${ARTICLE_EXPORT_ID} button {
-        border: 0;
-        background: transparent;
-        color: inherit;
-        font: inherit;
-        cursor: pointer;
-        transition:
-          background-color 140ms cubic-bezier(0.25, 1, 0.5, 1),
-          color 140ms cubic-bezier(0.25, 1, 0.5, 1),
-          transform 140ms cubic-bezier(0.25, 1, 0.5, 1);
-      }
-      #${ARTICLE_EXPORT_ID} button:active {
-        transform: translateY(1px) scale(0.985);
-      }
-      #${ARTICLE_EXPORT_ID} .__xposter_article_export_main {
-        min-width: 76px;
-        min-height: 36px;
-        padding: 0 12px;
-        font-weight: 740;
-      }
-      #${ARTICLE_EXPORT_ID} .__xposter_article_export_toggle {
-        width: 30px;
-        min-height: 36px;
-        border-left: 1px solid color-mix(in oklch, var(--__xposter-export-line), transparent 20%);
-        transform-origin: 50% 50%;
-        font-size: 12px;
-      }
-      #${ARTICLE_EXPORT_ID} .__xposter_article_export_toggle[aria-expanded="true"] {
-        transform: rotate(180deg);
-      }
-      #${ARTICLE_EXPORT_ID} .__xposter_article_export_menu {
-        position: absolute;
-        right: 0;
-        bottom: calc(100% + 10px);
-        min-width: 176px;
-        display: grid;
-        gap: 2px;
-        padding: 6px;
-        border: 1px solid var(--__xposter-export-line);
-        background: var(--__xposter-export-paper);
-        box-shadow: 0 12px 30px rgba(15, 20, 25, 0.13);
-        transform-origin: 100% 100%;
-        animation: __xposter_article_export_menu_in 160ms cubic-bezier(0.22, 1, 0.36, 1);
-      }
-      #${ARTICLE_EXPORT_ID} .__xposter_article_export_menu[hidden] {
-        display: none;
-      }
-      #${ARTICLE_EXPORT_ID} .__xposter_article_export_menu button {
-        display: flex;
-        justify-content: space-between;
-        gap: 12px;
-        padding: 8px 9px;
-        text-align: left;
-      }
-      #${ARTICLE_EXPORT_ID} .__xposter_article_export_menu button:hover,
-      #${ARTICLE_EXPORT_ID} .__xposter_article_export_menu button:focus-visible {
-        outline: none;
-        background: var(--__xposter-export-paper-2);
-        transform: translateX(1px);
-      }
-      #${ARTICLE_EXPORT_ID} .__xposter_article_export_menu button[aria-checked="true"]::after {
-        content: "✓";
+      #${ARTICLE_EXPORT_ID}[data-placement="fixed"] .__xposter_article_export_feedback {
+        flex-basis: 100%;
+        padding: 0 4px 2px;
         color: var(--__xposter-export-muted);
       }
       @keyframes __xposter_article_export_in {
         from {
           opacity: 0;
-          transform: translate3d(0, 6px, 0) scale(0.985);
-        }
-        to {
-          opacity: 0.86;
-          transform: translate3d(0, 0, 0) scale(1);
-        }
-      }
-      @keyframes __xposter_article_export_menu_in {
-        from {
-          opacity: 0;
-          transform: translate3d(0, 4px, 0) scale(0.985);
+          transform: translate3d(0, 4px, 0);
         }
         to {
           opacity: 1;
-          transform: translate3d(0, 0, 0) scale(1);
+          transform: translate3d(0, 0, 0);
         }
       }
       @keyframes __xposter_article_export_confirm {
         0% {
-          transform: translate3d(0, -1px, 0) scale(1);
+          transform: translate3d(0, 0, 0) scale(1);
         }
         45% {
-          transform: translate3d(0, -1px, 0) scale(1.025);
+          transform: translate3d(0, -1px, 0) scale(1.02);
         }
         100% {
-          transform: translate3d(0, -1px, 0) scale(1);
+          transform: translate3d(0, 0, 0) scale(1);
         }
       }
       @media (prefers-color-scheme: dark) {
@@ -2837,41 +2929,40 @@
           --__xposter-export-muted: #8b99a6;
           --__xposter-export-line: #33414d;
           --__xposter-export-signal: #66a9d8;
+          --__xposter-export-ok: #6fc8a4;
           --__xposter-export-danger: #ef7d86;
+        }
+        #${ARTICLE_EXPORT_ID}[data-placement="fixed"] {
           box-shadow: 0 12px 34px rgba(0, 0, 0, 0.30);
         }
-        #${ARTICLE_EXPORT_ID}:hover,
-        #${ARTICLE_EXPORT_ID}:focus-within {
-          background: var(--__xposter-export-paper-2);
-        }
-        #${ARTICLE_EXPORT_ID} .__xposter_article_export_menu {
-          box-shadow: 0 14px 36px rgba(0, 0, 0, 0.34);
-        }
-        #${ARTICLE_EXPORT_ID} .__xposter_article_export_menu button:hover,
-        #${ARTICLE_EXPORT_ID} .__xposter_article_export_menu button:focus-visible {
+        #${ARTICLE_EXPORT_ID}[data-placement="fixed"]:hover,
+        #${ARTICLE_EXPORT_ID}[data-placement="fixed"]:focus-within {
           background: var(--__xposter-export-paper-2);
         }
       }
       @media (prefers-reduced-motion: reduce) {
         #${ARTICLE_EXPORT_ID},
         #${ARTICLE_EXPORT_ID}[data-feedback],
-        #${ARTICLE_EXPORT_ID} button,
-        #${ARTICLE_EXPORT_ID} .__xposter_article_export_menu {
+        #${ARTICLE_EXPORT_ID} button {
           animation: none;
           transition-duration: 0.01ms;
         }
-        #${ARTICLE_EXPORT_ID}:hover,
-        #${ARTICLE_EXPORT_ID}:focus-within,
-        #${ARTICLE_EXPORT_ID} button,
-        #${ARTICLE_EXPORT_ID} .__xposter_article_export_menu button:hover,
-        #${ARTICLE_EXPORT_ID} .__xposter_article_export_menu button:focus-visible {
+        #${ARTICLE_EXPORT_ID}[data-placement="fixed"]:hover,
+        #${ARTICLE_EXPORT_ID}[data-placement="fixed"]:focus-within,
+        #${ARTICLE_EXPORT_ID} button {
           transform: none;
         }
       }
       @media (max-width: 720px) {
-        #${ARTICLE_EXPORT_ID} {
+        #${ARTICLE_EXPORT_ID}[data-placement="fixed"] {
           right: max(12px, env(safe-area-inset-right));
           bottom: max(14px, env(safe-area-inset-bottom));
+        }
+        #${ARTICLE_EXPORT_ID} {
+          width: 100%;
+        }
+        #${ARTICLE_EXPORT_ID} .__xposter_article_export_feedback {
+          flex-basis: 100%;
         }
       }
     `;
@@ -2977,18 +3068,24 @@
     document.addEventListener("drop", async (event) => {
       const intent = dropIntentForEvent(event);
       if (intent === "none") return;
-      const files = Array.from(event.dataTransfer.files || []);
+      const files = transferFilesFromDataTransfer(event.dataTransfer);
       const markdownFiles = files.filter(isMarkdownFile);
       const imageFiles = markdownFiles.length ? [] : imageFilesFromTransfer(event.dataTransfer);
       const markdownText = markdownFiles.length ? "" : markdownTextFromTransfer(event.dataTransfer);
       const imageUrl = markdownFiles.length || imageFiles.length || markdownText ? "" : imageUrlFromTransfer(event.dataTransfer);
       const directoryItem = markdownFiles.length || imageFiles.length || imageUrl ? null : findDirectoryTransferItem(event.dataTransfer);
-      if (!markdownFiles.length && !imageFiles.length && !markdownText && !imageUrl && !directoryItem) {
+      if (!markdownFiles.length && !imageFiles.length && !markdownText && !imageUrl && !directoryItem && intent !== "sidepanel-queue") {
         hideDropHint();
         return;
       }
       event.preventDefault();
       event.stopPropagation();
+      if (directoryItem && !isDropEventOverSurface(event, "folder")) {
+        showDropHint(event.dataTransfer, event, intent);
+        showStatus("Drop the folder into the blue folder area.", "warn", 3800);
+        window.setTimeout(hideDropHint, 260);
+        return;
+      }
       showDropHint(event.dataTransfer, event, intent);
       setDropHintProcessing(event.dataTransfer, intent);
       window.setTimeout(hideDropHint, 260);
@@ -3056,27 +3153,32 @@
 
   function dropIntentForTransfer(dataTransfer, event = null) {
     if (!dataTransfer) return "none";
-    const sidePanelIntent = sidePanelMarkdownDropIntent(dataTransfer);
+    const sidePanelIntent = sidePanelMarkdownDropIntent(dataTransfer, event);
     if (sidePanelIntent === "sidepanel-queue") return sidePanelIntent;
     if (isExplicitImageInsertDrop(dataTransfer, event)) return "image";
     if (isDirectoryDrop(dataTransfer, event)) return "folder";
+    if (findDirectoryTransferItem(dataTransfer) && isEditorRoute() && findEditor()) return "folder";
     if (isSingleMarkdownDrop(dataTransfer)) return "article";
     if (sidePanelIntent) return sidePanelIntent;
     return "none";
   }
 
-  function sidePanelMarkdownDropIntent(dataTransfer) {
-    const files = markdownFilesFromTransfer(dataTransfer);
-    if (files.length > 1) return "sidepanel-queue";
-    if (files.length === 1) return "";
+  function sidePanelMarkdownDropIntent(dataTransfer, event = null) {
+    const markdownFileCount = markdownTransferFileCount(dataTransfer);
+    if (markdownFileCount > 1) return "sidepanel-queue";
+    if (markdownFileCount === 1) return "";
     if (markdownTextFromTransfer(dataTransfer)) return "";
     const types = Array.from(dataTransfer?.types || []);
     if (types.includes("text/markdown")) return "";
-    const items = Array.from(dataTransfer?.items || []);
-    const markdownItems = items.filter(isLikelyMarkdownTransferItem);
-    if (markdownItems.length > 1) return "sidepanel-queue";
-    if (markdownItems.length === 1) return "";
-    if (hasFiles(dataTransfer) && items.length > 1 && !items.some(isLikelyImageTransferItem)) return "sidepanel-queue";
+    if (
+      hasUnmaterializedFileDrop(dataTransfer) &&
+      event &&
+      isEditorRoute() &&
+      isDropEventOverSurface(event, "sidepanel-queue") &&
+      !Array.from(dataTransfer?.items || []).some(isLikelyImageTransferItem)
+    ) {
+      return "sidepanel-queue";
+    }
     return "";
   }
 
@@ -3084,7 +3186,7 @@
     const files = markdownFilesFromTransfer(dataTransfer);
     if (files.length === 1) return true;
     if (files.length > 1) return false;
-    if (Array.from(dataTransfer?.files || []).length) return false;
+    if (transferFilesFromDataTransfer(dataTransfer).length) return false;
     if (markdownTextFromTransfer(dataTransfer)) return true;
     const items = Array.from(dataTransfer?.items || []);
     if (items.filter(isLikelyMarkdownTransferItem).length === 1) return true;
@@ -3103,16 +3205,50 @@
   function hasMarkdownText(dataTransfer) {
     const types = Array.from(dataTransfer?.types || []);
     if (!types.includes("text/plain")) return false;
-    return shared.looksLikeMarkdown(dataTransfer.getData("text/plain") || "");
+    return shared.looksLikeMarkdown(safeTransferData(dataTransfer, "text/plain"));
   }
 
   function markdownTextFromTransfer(dataTransfer) {
-    const text = dataTransfer?.getData?.("text/plain") || "";
+    const text = safeTransferData(dataTransfer, "text/plain");
     return shared.looksLikeMarkdown(text) ? text : "";
   }
 
+  function transferFilesFromDataTransfer(dataTransfer) {
+    const files = Array.from(dataTransfer?.files || []);
+    for (const item of Array.from(dataTransfer?.items || [])) {
+      if (item?.kind !== "file" || typeof item.getAsFile !== "function") continue;
+      try {
+        const file = item.getAsFile();
+        if (file) files.push(file);
+      } catch {
+        // Drag previews can block file materialization until drop.
+      }
+    }
+    const seen = new Set();
+    return files.filter((file) => {
+      const key = [file.name || "", file.size || 0, file.type || "", file.lastModified || 0].join(":");
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
   function markdownFilesFromTransfer(dataTransfer) {
-    return Array.from(dataTransfer?.files || []).filter(isMarkdownFile);
+    return transferFilesFromDataTransfer(dataTransfer).filter(isMarkdownFile);
+  }
+
+  function markdownTransferFileCount(dataTransfer) {
+    const files = markdownFilesFromTransfer(dataTransfer);
+    if (files.length) return files.length;
+    const items = Array.from(dataTransfer?.items || []);
+    const markdownItems = items.filter(isLikelyMarkdownTransferItem);
+    if (markdownItems.length) return markdownItems.length;
+    if (hasFiles(dataTransfer) && items.length > 1 && !items.some(isLikelyImageTransferItem)) return items.length;
+    return 0;
+  }
+
+  function hasUnmaterializedFileDrop(dataTransfer) {
+    return hasFiles(dataTransfer) && !transferFilesFromDataTransfer(dataTransfer).length;
   }
 
   function isMarkdownFile(file) {
@@ -3261,7 +3397,7 @@
       case "queue":
         return { title: "Queue Markdown drafts", detail: "Release over this area to send them to the side panel." };
       case "folder":
-        return { title: "Connect image folder", detail: "Release here to link local images for this article." };
+        return { title: "Drop image folder here", detail: "Release to connect this folder for local images." };
       case "image":
         return { title: "Insert image at cursor", detail: "Hold Option/Alt and release over the article body." };
       default:
@@ -3283,7 +3419,7 @@
       case "queue":
         return { title: "Adding drafts...", detail: "Saving Markdown drafts for the side panel." };
       case "folder":
-        return { title: "Connecting folder...", detail: "Checking local image access." };
+        return { title: "Connecting image folder...", detail: "Preparing local image access." };
       case "image":
         return { title: "Adding image...", detail: "Using the current article cursor." };
       default:
@@ -3346,6 +3482,7 @@
   function dropHintSurfaceKind(intent = "article") {
     if (intent === "sidepanel-draft" || intent === "sidepanel-queue") return "page-dock";
     if (intent === "article") return "page-dock";
+    if (intent === "folder") return "page-dock";
     return "editor";
   }
 
@@ -3371,7 +3508,7 @@
 
   function pageDropDockSurfaceRect() {
     const margin = 0;
-    const height = Math.min(118, Math.max(86, Math.round(window.innerHeight * 0.12)));
+    const height = Math.min(168, Math.max(128, Math.round(window.innerHeight * 0.18)));
     return normalizeDropSurfaceRect({
       left: 0,
       top: window.innerHeight - height - margin,
@@ -3484,9 +3621,9 @@
     if (intent === "folder") return "folder";
     if (!dataTransfer) return "markdown";
     if (hasMarkdownText(dataTransfer)) return "markdown";
-    const files = Array.from(dataTransfer.files || []);
-    if (files.filter(isMarkdownFile).length > 1) return "queue";
-    if (files.some(isMarkdownFile)) return "markdown";
+    const files = transferFilesFromDataTransfer(dataTransfer);
+    if (files.filter(isMarkdownFile).length > 1 || markdownTransferFileCount(dataTransfer) > 1) return "queue";
+    if (files.some(isMarkdownFile) || markdownTransferFileCount(dataTransfer) === 1) return "markdown";
     if (files.some(isImageFile)) return "image";
     const items = Array.from(dataTransfer.items || []);
     if (items.some(isLikelyImageTransferItem)) return "image";
@@ -3608,31 +3745,47 @@
         line-height: 1.35;
       }
       #${DROP_HINT_ID}[data-surface="page-dock"] {
-        height: var(--xposter-drop-surface-height, 104px);
-        padding: 14px max(18px, calc((100vw - 980px) / 2));
+        height: var(--xposter-drop-surface-height, 132px);
+        padding: 18px max(18px, calc((100vw - 980px) / 2));
       }
       #${DROP_HINT_ID}[data-surface="page-dock"]::before {
-        border-right: 0;
+        border: 1px solid rgba(29, 155, 240, 0.42);
         border-bottom: 0;
-        border-left: 0;
         border-radius: 8px 8px 0 0;
+        background:
+          linear-gradient(180deg, rgba(232, 246, 255, 0.98), rgba(214, 238, 255, 0.96));
+        box-shadow:
+          0 -14px 34px rgba(29, 155, 240, 0.16),
+          inset 0 1px 0 rgba(255, 255, 255, 0.86),
+          inset 0 0 0 1px rgba(29, 155, 240, 0.08);
+        transform-origin: 50% 100%;
+        will-change: transform, box-shadow, opacity;
       }
       #${DROP_HINT_ID}[data-surface="page-dock"]::after {
         content: "";
         position: absolute;
         left: max(18px, calc((100vw - 980px) / 2));
         right: max(18px, calc((100vw - 980px) / 2));
-        bottom: 10px;
-        top: auto;
-        height: 2px;
-        border: 0;
-        border-radius: 999px;
-        opacity: 0.92;
-        background:
-          linear-gradient(90deg, var(--xposter-drop-accent) 0 var(--xposter-drop-progress), transparent var(--xposter-drop-progress) 100%),
-          color-mix(in srgb, var(--xposter-drop-accent), transparent 78%);
+        top: 16px;
+        bottom: 16px;
+        height: auto;
+        border: 1.5px dashed rgba(29, 155, 240, 0.48);
+        border-radius: 8px;
+        opacity: 1;
+        background: rgba(255, 255, 255, 0.46);
         overflow: hidden;
-        transition: background 220ms cubic-bezier(0.22, 1, 0.36, 1);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.62);
+        transform-origin: 50% 100%;
+        will-change: transform, box-shadow, opacity;
+        transition:
+          background 220ms cubic-bezier(0.22, 1, 0.36, 1),
+          border-color 220ms cubic-bezier(0.22, 1, 0.36, 1);
+      }
+      #${DROP_HINT_ID}[data-surface="page-dock"][data-state="ready"]::before {
+        animation: __xposter_drop_dock_breathe 1.85s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+      }
+      #${DROP_HINT_ID}[data-surface="page-dock"][data-state="ready"]::after {
+        animation: __xposter_drop_dock_receive 1.85s cubic-bezier(0.22, 1, 0.36, 1) infinite;
       }
       #${DROP_HINT_ID}[data-surface="page-dock"] .__xposter_drop_frame {
         width: min(720px, 100%);
@@ -3649,45 +3802,75 @@
       }
       #${DROP_HINT_ID}[data-mode="markdown"][data-surface="page-dock"]::before {
         background:
-          linear-gradient(180deg, rgba(84, 185, 255, 0.24), rgba(29, 155, 240, 0.08)),
-          linear-gradient(90deg, var(--xposter-drop-signal-text), var(--xposter-drop-signal) 52%, #0f7acb);
-        border-color: rgba(117, 201, 255, 0.62);
+          linear-gradient(180deg, rgba(238, 249, 255, 0.98), rgba(217, 240, 255, 0.97));
+        border-color: rgba(29, 155, 240, 0.52);
         box-shadow:
-          0 -16px 42px rgba(29, 155, 240, 0.32),
-          inset 0 1px 0 rgba(255, 255, 255, 0.34),
-          inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+          0 -14px 36px rgba(29, 155, 240, 0.18),
+          inset 0 1px 0 rgba(255, 255, 255, 0.92),
+          inset 0 0 0 1px rgba(29, 155, 240, 0.10);
       }
       #${DROP_HINT_ID}[data-mode="markdown"][data-surface="page-dock"]::after {
+        border-color: rgba(29, 155, 240, 0.58);
+        background: rgba(255, 255, 255, 0.54);
+      }
+      #${DROP_HINT_ID}[data-mode="folder"][data-surface="page-dock"]::before {
         background:
-          linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.0) 18%, rgba(255, 255, 255, 0.86) 50%, rgba(255, 255, 255, 0.0) 82%, transparent 100%) 0 0 / 180px 100% no-repeat,
-          linear-gradient(90deg, #ffffff 0 var(--xposter-drop-progress), transparent var(--xposter-drop-progress) 100%),
-          rgba(255, 255, 255, 0.30);
-        animation: __xposter_drop_rail 1.7s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+          linear-gradient(180deg, rgba(238, 249, 255, 0.98), rgba(217, 240, 255, 0.97));
+        border-color: rgba(29, 155, 240, 0.52);
+        box-shadow:
+          0 -14px 36px rgba(29, 155, 240, 0.18),
+          inset 0 1px 0 rgba(255, 255, 255, 0.92),
+          inset 0 0 0 1px rgba(29, 155, 240, 0.10);
+      }
+      #${DROP_HINT_ID}[data-mode="folder"][data-surface="page-dock"]::after {
+        border-color: rgba(29, 155, 240, 0.58);
+        background: rgba(255, 255, 255, 0.54);
       }
       #${DROP_HINT_ID}[data-mode="markdown"][data-surface="page-dock"] .__xposter_drop_frame {
-        color: #ffffff;
-        text-shadow: 0 1px 10px rgba(0, 42, 78, 0.26);
+        color: #0f3554;
+        text-shadow: none;
+      }
+      #${DROP_HINT_ID}[data-mode="folder"][data-surface="page-dock"] .__xposter_drop_frame {
+        color: #0f3554;
+        text-shadow: none;
       }
       #${DROP_HINT_ID}[data-mode="markdown"][data-surface="page-dock"] .__xposter_drop_copy {
         display: grid;
         gap: 3px;
         min-width: 0;
       }
+      #${DROP_HINT_ID}[data-mode="folder"][data-surface="page-dock"] .__xposter_drop_copy {
+        display: grid;
+        gap: 3px;
+        min-width: 0;
+      }
       #${DROP_HINT_ID}[data-mode="markdown"][data-surface="page-dock"] strong {
-        color: #ffffff;
+        color: #063b63;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        animation: __xposter_drop_text_focus 1.9s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+      }
+      #${DROP_HINT_ID}[data-mode="folder"][data-surface="page-dock"] strong {
+        color: #063b63;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       #${DROP_HINT_ID}[data-mode="markdown"][data-surface="page-dock"] p {
         max-width: 30rem;
         margin: 0;
-        color: rgba(255, 255, 255, 0.86);
+        color: #35627f;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        animation: __xposter_drop_text_focus 1.9s cubic-bezier(0.22, 1, 0.36, 1) 120ms infinite;
+      }
+      #${DROP_HINT_ID}[data-mode="folder"][data-surface="page-dock"] p {
+        max-width: 30rem;
+        margin: 0;
+        color: #35627f;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       #${DROP_HINT_ID} .__xposter_drop_status {
         display: inline-flex;
@@ -3709,22 +3892,85 @@
         white-space: nowrap;
       }
       #${DROP_HINT_ID}[data-mode="markdown"][data-surface="page-dock"] .__xposter_drop_status {
-        border-color: rgba(255, 255, 255, 0.32);
-        background: rgba(255, 255, 255, 0.16);
-        color: rgba(255, 255, 255, 0.92);
+        border-color: rgba(29, 155, 240, 0.38);
+        background: rgba(232, 246, 255, 0.82);
+        color: #0f6cbf;
+        text-shadow: none;
+      }
+      #${DROP_HINT_ID}[data-mode="folder"][data-surface="page-dock"] .__xposter_drop_status {
+        border-color: rgba(29, 155, 240, 0.38);
+        background: rgba(232, 246, 255, 0.82);
+        color: #0f6cbf;
         text-shadow: none;
       }
       #${DROP_HINT_ID}[data-mode="markdown"][data-surface="page-dock"] .__xposter_drop_mark {
-        border-color: rgba(255, 255, 255, 0.48);
-        background: rgba(255, 255, 255, 0.18);
-        box-shadow: inset 0 0 0 4px rgba(255, 255, 255, 0.18);
+        border-color: rgba(29, 155, 240, 0.50);
+        background: rgba(232, 246, 255, 0.92);
+        box-shadow: inset 0 0 0 4px rgba(255, 255, 255, 0.76);
       }
       #${DROP_HINT_ID}[data-mode="markdown"][data-surface="page-dock"] .__xposter_drop_mark::before,
       #${DROP_HINT_ID}[data-mode="markdown"][data-surface="page-dock"] .__xposter_drop_mark::after {
-        background: #ffffff;
+        background: #1d9bf0;
       }
       #${DROP_HINT_ID}[data-mode="markdown"][data-state="ready"] .__xposter_drop_mark {
         animation: __xposter_drop_mark_hint 1.45s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+      }
+      #${DROP_HINT_ID}[data-mode="folder"] {
+        --xposter-drop-accent: var(--xposter-drop-signal);
+        --xposter-drop-paper: rgba(246, 251, 255, 0.98);
+        --xposter-drop-line: rgba(29, 155, 240, 0.32);
+        --xposter-drop-dash: rgba(29, 155, 240, 0.40);
+      }
+      #${DROP_HINT_ID}[data-mode="folder"][data-surface="editor"]::before {
+        background: rgba(246, 251, 255, 0.72);
+      }
+      #${DROP_HINT_ID}[data-mode="folder"][data-surface="editor"] .__xposter_drop_frame {
+        border-color: rgba(29, 155, 240, 0.32);
+        background: rgba(255, 255, 255, 0.92);
+        box-shadow:
+          0 14px 34px rgba(15, 20, 25, 0.10),
+          0 0 0 1px rgba(29, 155, 240, 0.08);
+      }
+      #${DROP_HINT_ID}[data-mode="folder"] .__xposter_drop_mark {
+        width: 34px;
+        height: 28px;
+        margin-top: 4px;
+        border: 1.5px solid currentColor;
+        border-radius: 5px;
+        background: color-mix(in srgb, var(--xposter-drop-accent), white 84%);
+        box-shadow: none;
+        transform-origin: 50% 80%;
+      }
+      #${DROP_HINT_ID}[data-mode="folder"] .__xposter_drop_mark::before {
+        left: 9px;
+        top: -5px;
+        width: 15px;
+        height: 7px;
+        border: 1.5px solid currentColor;
+        border-bottom: 0;
+        border-radius: 4px 4px 0 0;
+        background: color-mix(in srgb, var(--xposter-drop-accent), white 80%);
+        transform: none;
+      }
+      #${DROP_HINT_ID}[data-mode="folder"] .__xposter_drop_mark::after {
+        left: 50%;
+        top: 50%;
+        width: 11px;
+        height: 11px;
+        border-right: 2px solid currentColor;
+        border-bottom: 2px solid currentColor;
+        background: transparent;
+        transform: translate(-50%, -58%) rotate(45deg);
+      }
+      #${DROP_HINT_ID}[data-mode="folder"][data-surface="page-dock"] .__xposter_drop_mark {
+        color: #1d9bf0;
+        background: rgba(232, 246, 255, 0.92);
+      }
+      #${DROP_HINT_ID}[data-mode="folder"][data-surface="page-dock"] .__xposter_drop_mark::before {
+        background: rgba(217, 240, 255, 0.96);
+      }
+      #${DROP_HINT_ID}[data-mode="folder"][data-state="ready"] .__xposter_drop_mark {
+        animation: __xposter_folder_drop_hint 1.2s cubic-bezier(0.22, 1, 0.36, 1) infinite;
       }
       #${DROP_HINT_ID}[data-surface="editor"] {
         min-height: 64px;
@@ -3775,9 +4021,6 @@
       #${DROP_HINT_ID}[data-mode="image"] {
         --xposter-drop-accent: var(--xposter-drop-ok);
       }
-      #${DROP_HINT_ID}[data-mode="folder"] {
-        --xposter-drop-accent: var(--xposter-drop-muted);
-      }
       #${DROP_HINT_ID}[data-state="processing"] {
         --xposter-drop-accent: var(--xposter-drop-signal);
         --xposter-drop-progress: 100%;
@@ -3800,36 +4043,66 @@
         0%, 100% { transform: scale(1); opacity: 1; }
         50% { transform: scale(0.94); opacity: 0.72; }
       }
-      @keyframes __xposter_drop_rail {
-        0% { background-position: -180px 0, 0 0, 0 0; }
-        100% { background-position: calc(100% + 180px) 0, 0 0, 0 0; }
-      }
       @keyframes __xposter_drop_mark_hint {
         0%, 100% {
           transform: scale(1);
           box-shadow:
-            inset 0 0 0 4px rgba(255, 255, 255, 0.66),
-            0 0 0 0 rgba(29, 155, 240, 0.22);
+            inset 0 0 0 4px rgba(255, 255, 255, 0.76),
+            0 0 0 0 rgba(29, 155, 240, 0.24);
         }
         50% {
-          transform: scale(0.96);
+          transform: translateY(-1px) scale(1.08);
           box-shadow:
-            inset 0 0 0 4px rgba(255, 255, 255, 0.66),
-            0 0 0 7px rgba(29, 155, 240, 0);
+            inset 0 0 0 4px rgba(255, 255, 255, 0.76),
+            0 0 0 8px rgba(29, 155, 240, 0);
         }
       }
-      @keyframes __xposter_drop_text_focus {
-        0%, 100% { opacity: 0.86; transform: translateY(0); }
-        45% { opacity: 1; transform: translateY(-1px); }
+      @keyframes __xposter_drop_dock_breathe {
+        0%, 100% {
+          transform: translateY(0) scale(1);
+          opacity: 1;
+          box-shadow:
+            0 -14px 36px rgba(29, 155, 240, 0.18),
+            inset 0 1px 0 rgba(255, 255, 255, 0.92),
+            inset 0 0 0 1px rgba(29, 155, 240, 0.10);
+        }
+        50% {
+          transform: translateY(-2px) scale(1.006, 1.035);
+          opacity: 0.98;
+          box-shadow:
+            0 -18px 42px rgba(29, 155, 240, 0.23),
+            inset 0 1px 0 rgba(255, 255, 255, 0.96),
+            inset 0 0 0 1px rgba(29, 155, 240, 0.18);
+        }
+      }
+      @keyframes __xposter_drop_dock_receive {
+        0%, 100% {
+          transform: translateY(0) scale(1);
+          opacity: 0.88;
+          box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.62);
+        }
+        50% {
+          transform: translateY(-4px) scale(1.012, 1.055);
+          opacity: 1;
+          box-shadow:
+            inset 0 0 0 1px rgba(255, 255, 255, 0.72),
+            0 0 0 5px rgba(29, 155, 240, 0.10);
+        }
+      }
+      @keyframes __xposter_folder_drop_hint {
+        0%, 100% { transform: translateY(0) scale(1); }
+        50% { transform: translateY(3px) scale(1.04); }
       }
       @media (prefers-reduced-motion: reduce) {
         #${DROP_HINT_ID},
         #${DROP_HINT_ID} .__xposter_drop_frame,
         #${DROP_HINT_ID}[data-state="processing"] .__xposter_drop_mark,
         #${DROP_HINT_ID}[data-mode="markdown"][data-state="ready"] .__xposter_drop_mark,
-        #${DROP_HINT_ID}[data-mode="markdown"][data-surface="page-dock"] strong,
-        #${DROP_HINT_ID}[data-mode="markdown"][data-surface="page-dock"] p,
-        #${DROP_HINT_ID}[data-surface="page-dock"]::after {
+        #${DROP_HINT_ID}[data-mode="folder"][data-state="ready"] .__xposter_drop_mark,
+        #${DROP_HINT_ID}[data-surface="page-dock"]::before,
+        #${DROP_HINT_ID}[data-surface="page-dock"][data-state="ready"]::before,
+        #${DROP_HINT_ID}[data-surface="page-dock"]::after,
+        #${DROP_HINT_ID}[data-surface="page-dock"][data-state="ready"]::after {
           animation: none;
         }
       }
@@ -3852,8 +4125,29 @@
         }
         #${DROP_HINT_ID}[data-mode="markdown"][data-surface="page-dock"]::before {
           background:
-            linear-gradient(180deg, rgba(84, 185, 255, 0.22), rgba(29, 155, 240, 0.10)),
-            linear-gradient(90deg, #0c5f9e, var(--xposter-drop-signal) 52%, #0c6fb6);
+            linear-gradient(180deg, rgba(15, 42, 61, 0.98), rgba(14, 54, 84, 0.96));
+          border-color: rgba(102, 169, 216, 0.44);
+        }
+        #${DROP_HINT_ID}[data-mode="folder"][data-surface="page-dock"]::before {
+          background:
+            linear-gradient(180deg, rgba(15, 42, 61, 0.98), rgba(14, 54, 84, 0.96));
+          border-color: rgba(102, 169, 216, 0.44);
+        }
+        #${DROP_HINT_ID}[data-mode="folder"] {
+          --xposter-drop-paper: rgba(15, 29, 43, 0.96);
+          --xposter-drop-line: rgba(102, 169, 216, 0.38);
+        }
+        #${DROP_HINT_ID}[data-mode="folder"] .__xposter_drop_mark {
+          background: rgba(102, 169, 216, 0.22);
+        }
+        #${DROP_HINT_ID}[data-mode="folder"] .__xposter_drop_mark::before {
+          background: rgba(102, 169, 216, 0.18);
+        }
+        #${DROP_HINT_ID}[data-mode="folder"][data-surface="editor"]::before {
+          background: rgba(15, 29, 43, 0.44);
+        }
+        #${DROP_HINT_ID}[data-mode="folder"][data-surface="editor"] .__xposter_drop_frame {
+          background: rgba(22, 24, 28, 0.84);
         }
         #${DROP_HINT_ID}::before {
           box-shadow:
@@ -3861,7 +4155,8 @@
             inset 0 0 0 1px rgba(231, 233, 234, 0.06);
         }
         #${DROP_HINT_ID}[data-surface="page-dock"]::after {
-          background: rgba(231, 233, 234, 0.12);
+          border-color: rgba(102, 169, 216, 0.48);
+          background: rgba(102, 169, 216, 0.10);
         }
         #${DROP_HINT_ID}[data-surface="editor"]::before {
           background: rgba(22, 24, 28, 0.34);
@@ -3879,7 +4174,7 @@
           width: 100vw;
           top: auto;
           bottom: 0;
-          height: 104px;
+          height: 132px;
         }
         #${DROP_HINT_ID}[data-surface="page-dock"] .__xposter_drop_frame {
           grid-template-columns: 30px minmax(0, 1fr);

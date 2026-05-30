@@ -1,243 +1,59 @@
 (() => {
   const shared = window.xPosterShared;
   const i18n = window.xPosterI18n;
-  const IMPORT_ICON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v3H4V4Zm0 5h10v3H4V9Zm0 5h8v3H4v-3Zm13.5-.7V9h2v4.3l1.6-1.6 1.4 1.4-3.5 3.5-3.5-3.5 1.4-1.4 1.6 1.6ZM17 18h5v2h-5v-2Z"/></svg>';
-  const els = {
-    markdown: document.getElementById("markdown"),
-    draftEditorToolbar: document.getElementById("draftEditorToolbar"),
-    draftEditorStatus: document.getElementById("draftEditorStatus"),
-    draftEditorModeToggle: document.getElementById("draftEditorModeToggle"),
-    draftEditorStats: document.getElementById("draftEditorStats"),
-    draftInlinePreview: document.getElementById("draftInlinePreview"),
-    draftInlinePreviewHead: document.getElementById("draftInlinePreviewHead"),
-    draftInlinePreviewTitle: document.getElementById("draftInlinePreviewTitle"),
-    draftInlinePreviewMeta: document.getElementById("draftInlinePreviewMeta"),
-    draftInlinePreviewBody: document.getElementById("draftInlinePreviewBody"),
-    draftSyntaxHighlight: document.getElementById("draftSyntaxHighlight"),
-    draftEditorInputWrap: document.querySelector(".draft-editor-input-wrap"),
-    draftEditorShell: document.querySelector(".draft-editor-shell"),
-    pageState: document.getElementById("pageState"),
-    advancedDiagnostics: document.getElementById("advancedDiagnostics"),
-    evidenceDetails: document.getElementById("evidenceDetails"),
-    titleMetric: document.getElementById("titleMetric"),
-    imageMetric: document.getElementById("imageMetric"),
-    tableMetric: document.getElementById("tableMetric"),
-    tweetMetric: document.getElementById("tweetMetric"),
-    targetReady: document.getElementById("targetReady"),
-    editorReady: document.getElementById("editorReady"),
-    vaultReady: document.getElementById("vaultReady"),
-    inspector: document.querySelector(".inspector"),
-    targetContextPanel: document.getElementById("targetContextPanel"),
-    targetContextMeta: document.getElementById("targetContextMeta"),
-    targetContextState: document.getElementById("targetContextState"),
-    targetContextRoute: document.getElementById("targetContextRoute"),
-    targetContextArticle: document.getElementById("targetContextArticle"),
-    targetContextTitle: document.getElementById("targetContextTitle"),
-    targetContextSample: document.getElementById("targetContextSample"),
-    issueQueueMeta: document.getElementById("issueQueueMeta"),
-    issueQueueList: document.getElementById("issueQueueList"),
-    conversionMapMeta: document.getElementById("conversionMapMeta"),
-    conversionMapList: document.getElementById("conversionMapList"),
-    importLedgerMeta: document.getElementById("importLedgerMeta"),
-    importLedgerList: document.getElementById("importLedgerList"),
-    recordsPanel: document.getElementById("recordsPanel"),
-    recordsEmpty: document.getElementById("recordsEmpty"),
-    recordHistory: document.getElementById("recordHistory"),
-    recordHistoryMeta: document.getElementById("recordHistoryMeta"),
-    recordSearchInput: document.getElementById("recordSearchInput"),
-    recordSearchSummary: document.getElementById("recordSearchSummary"),
-    recordHistoryList: document.getElementById("recordHistoryList"),
-    recordEditSheet: document.getElementById("recordEditSheet"),
-    recordEditTitle: document.getElementById("recordEditTitle"),
-    recordEditMeta: document.getElementById("recordEditMeta"),
-    recordEditBody: document.getElementById("recordEditBody"),
-    recordEditToolbar: document.getElementById("recordEditToolbar"),
-    recordEditInputWrap: document.getElementById("recordEditInputWrap"),
-    recordEditHighlight: document.getElementById("recordEditHighlight"),
-    recordEditPreview: document.getElementById("recordEditPreview"),
-    recordEditPreviewBody: document.getElementById("recordEditPreviewBody"),
-    recordEditTextarea: document.getElementById("recordEditTextarea"),
-    recordEditStats: document.getElementById("recordEditStats"),
-    recordEditModeToggle: document.getElementById("recordEditModeToggle"),
-    recordEditPrimaryLabel: document.getElementById("recordEditPrimaryLabel"),
-    recordEditWriteButton: document.getElementById("recordEditWriteButton"),
-    draftQueue: document.getElementById("draftQueue"),
-    draftQueueMeta: document.getElementById("draftQueueMeta"),
-    draftQueueList: document.getElementById("draftQueueList"),
-    clearRecordHistory: document.getElementById("clearRecordHistory"),
-    recordClearConfirm: document.getElementById("recordClearConfirm"),
-    cancelRecordClear: document.getElementById("cancelRecordClear"),
-    confirmRecordClear: document.getElementById("confirmRecordClear"),
-    reviewMeta: document.getElementById("reviewMeta"),
-    reviewList: document.getElementById("reviewList"),
-    importDraft: document.getElementById("importDraft"),
-    importHint: document.getElementById("importHint"),
-    draftMediaAlert: document.getElementById("draftMediaAlert"),
-    draftMediaAlertTitle: document.getElementById("draftMediaAlertTitle"),
-    draftMediaAlertDetail: document.getElementById("draftMediaAlertDetail"),
-    loadFile: document.getElementById("loadFile"),
-    pickVault: document.getElementById("pickVault"),
-    clearVault: document.getElementById("clearVault"),
-    clearVaultSettings: document.getElementById("clearVaultSettings"),
-    vaultState: document.getElementById("vaultState"),
-    vaultDetail: document.getElementById("vaultDetail"),
-    vaultSettingsText: document.getElementById("vaultSettingsText"),
-    activityLog: document.getElementById("activityLog"),
-    previewTitle: document.getElementById("previewTitle"),
-    previewMeta: document.getElementById("previewMeta"),
-    previewBody: document.getElementById("previewBody"),
-    planReadiness: document.getElementById("planReadiness"),
-    planBreakdown: document.getElementById("planBreakdown"),
-    planSteps: document.getElementById("planSteps"),
-    preflightMeta: document.getElementById("preflightMeta"),
-    preflightList: document.getElementById("preflightList"),
-    runPreflight: document.getElementById("runPreflight"),
-    timelineMeta: document.getElementById("timelineMeta"),
-    timelineList: document.getElementById("timelineList"),
-    liveProgress: document.getElementById("liveProgress"),
-    liveProgressState: document.getElementById("liveProgressState"),
-    liveProgressBar: document.getElementById("liveProgressBar"),
-    liveProgressTitle: document.getElementById("liveProgressTitle"),
-    liveProgressDetail: document.getElementById("liveProgressDetail"),
-    cancelImport: document.getElementById("cancelImport"),
-    recoveryPanel: document.getElementById("recoveryPanel"),
-    recoveryMeta: document.getElementById("recoveryMeta"),
-    recoveryState: document.getElementById("recoveryState"),
-    recoveryList: document.getElementById("recoveryList"),
-    runSummary: document.getElementById("runSummary"),
-    summaryMessage: document.getElementById("summaryMessage"),
-    summaryImages: document.getElementById("summaryImages"),
-    summaryBlocks: document.getElementById("summaryBlocks"),
-    summaryTitle: document.getElementById("summaryTitle"),
-    summaryCover: document.getElementById("summaryCover"),
-    summaryElapsed: document.getElementById("summaryElapsed"),
-    liveResultMeta: document.getElementById("liveResultMeta"),
-    liveResultList: document.getElementById("liveResultList"),
-    resetLiveResult: document.getElementById("resetLiveResult"),
-    liveRunbookMeta: document.getElementById("liveRunbookMeta"),
-    liveRunbookList: document.getElementById("liveRunbookList"),
-    focusRunbook: document.getElementById("focusRunbook"),
-    draftDropStatus: document.getElementById("draftDropStatus"),
-    draftDropTarget: document.getElementById("draftDropTarget"),
-    draftDropDismiss: document.getElementById("draftDropDismiss"),
-    proofDeckMeta: document.getElementById("proofDeckMeta"),
-    proofDeckList: document.getElementById("proofDeckList"),
-    completionAuditMeta: document.getElementById("completionAuditMeta"),
-    completionAuditList: document.getElementById("completionAuditList"),
-    draftPanel: document.getElementById("draftPanel"),
-    previewPanel: document.getElementById("previewPanel"),
-    preflightPanel: document.getElementById("preflightPanel"),
-    verificationPanel: document.getElementById("verificationPanel"),
-    localImagesPanel: document.getElementById("localImagesPanel"),
-    liveResultPanel: document.getElementById("liveResultPanel"),
-    extensionPath: document.getElementById("extensionPath"),
-    copyExtensionPath: document.getElementById("copyExtensionPath"),
-    copyProofDeck: document.getElementById("copyProofDeck"),
-    evidencePanel: document.getElementById("evidencePanel"),
-    evidenceMeta: document.getElementById("evidenceMeta"),
-    evidenceText: document.getElementById("evidenceText"),
-    copyEvidence: document.getElementById("copyEvidence"),
-    copyEvidencePackage: document.getElementById("copyEvidencePackage"),
-    downloadEvidencePackage: document.getElementById("downloadEvidencePackage"),
-    languageControl: document.getElementById("languageControl"),
-    languageSelect: document.getElementById("languageSelect"),
-    languageSelectButton: document.getElementById("languageSelectButton"),
-    languageSelectValue: document.getElementById("languageSelectValue"),
-    languageOptionsList: document.getElementById("languageOptionsList"),
-    themeChoice: document.getElementById("themeChoice"),
-    metadataOptions: document.getElementById("metadataOptions"),
-    importTitleOption: document.getElementById("importTitleOption"),
-    importCoverOption: document.getElementById("importCoverOption"),
-    articleExportOptions: document.getElementById("articleExportOptions"),
-    articleExportOption: document.getElementById("articleExportOption"),
-    successFeedbackOptions: document.getElementById("successFeedbackOptions"),
-    confettiOption: document.getElementById("confettiOption"),
-    successSoundOption: document.getElementById("successSoundOption"),
-    successSoundStyle: document.getElementById("successSoundStyle"),
-    activityPanel: document.getElementById("activityPanel")
-  };
-
-  const STORAGE_DRAFT = "xposter_sidepanel_draft";
-  const STORAGE_LIVE_RESULT = "xposter_live_result_checks";
-  const STORAGE_LANGUAGE = "xposter_language";
-  const STORAGE_THEME = "xposter_theme";
-  const STORAGE_IMPORT_OPTIONS = "xposter_import_options";
-  const STORAGE_ARTICLE_EXPORT_SETTINGS = "xposter_article_export_settings";
-  const STORAGE_SUCCESS_FEEDBACK = "xposter_success_feedback";
-  const STORAGE_RECORD_HISTORY = "xposter_publish_record_history";
-  const STORAGE_DRAFT_QUEUE = "xposter_publish_queue";
-  const MAX_RECORD_HISTORY = 30;
-  const MAX_DRAFT_QUEUE = 24;
-  const MAX_DRAFT_QUEUE_STORAGE_BYTES = 4 * 1024 * 1024;
-  const MAX_DRAFT_QUEUE_ITEM_BYTES = 512 * 1024;
-  const MAX_RECORD_MARKDOWN_CHARS = 120000;
-  const X_ARTICLE_MEDIA_SOFT_LIMIT = 25;
-  const X_ARTICLE_MEDIA_HEADROOM_THRESHOLD = 21;
-  const X_ARTICLE_MEDIA_LIMIT_WARNING =
-    "Images: {count}/{limit}. Remove {extra} image(s) before writing.";
-  const X_ARTICLE_MEDIA_HEADROOM_NOTE =
-    "Images: {count}/{limit}. Close to X Article's image limit.";
-  const X_ARTICLE_MEDIA_CAPACITY_NOTE =
-    "Images: {count}/{limit}.";
-  const MARKDOWN_FILE_RE = /\.(md|markdown|mdown|mkd|txt)$/i;
-  const MARKDOWN_FILE_ACCEPT = ".md,.markdown,.mdown,.mkd,.txt,text/markdown,text/plain";
-  const MARKDOWN_TRANSFER_MIME_RE = /^(text\/markdown|text\/plain|application\/octet-stream)$/i;
-  const MARKDOWN_LOAD_ERROR_TITLE = "Could not load Markdown";
-  const MARKDOWN_LOAD_ERROR_DETAIL = "Try a .md, .markdown, .txt file, or plain Markdown text.";
-  const NO_NEW_DRAFTS_DETAIL = "No new Markdown drafts were added.";
-  const DRAFT_EDITOR_MODES = new Set(["edit", "read"]);
-  const EDITOR_HISTORY_LIMIT = 40;
-  const DRAFT_SAVE_DELAY_MS = 220;
-  const DRAFT_ANALYZE_DELAY_MS = 140;
-  const RECORD_SEARCH_DELAY_MS = 120;
-  const STARTUP_DRAFT_ANALYZE_DELAY_MS = 260;
-  const STARTUP_IDLE_TIMEOUT_MS = 650;
-  const STARTUP_PAGE_STATE_TIMEOUT_MS = 900;
-  const STARTUP_STORAGE_KEYS = [
+  const sidepanelConfig = window.xPosterSidepanelConfig;
+  const sidepanelElements = window.xPosterSidepanelElements;
+  const sidepanelEditor = window.xPosterSidepanelEditor;
+  const els = sidepanelElements.collectSidepanelElements();
+  const {
+    IMPORT_ICON_SVG,
     STORAGE_DRAFT,
-    STORAGE_DRAFT_QUEUE,
-    STORAGE_THEME,
+    STORAGE_LIVE_RESULT,
     STORAGE_LANGUAGE,
+    STORAGE_THEME,
     STORAGE_IMPORT_OPTIONS,
     STORAGE_ARTICLE_EXPORT_SETTINGS,
     STORAGE_SUCCESS_FEEDBACK,
-    STORAGE_LIVE_RESULT
-  ];
-  const SYNTAX_HIGHLIGHT_DETAIL_LIMIT = 60000;
-  const THEME_MODES = new Set(["system", "light", "dark"]);
-  const SUCCESS_SOUND_VOLUME = 1;
-  const SUCCESS_SOUND_PRESETS = {
-    soft: {
-      master: 0.18,
-      notes: [
-        { frequency: 523.25, start: 0, duration: 0.18, type: "sine", gain: 0.48 },
-        { frequency: 659.25, start: 0.09, duration: 0.22, type: "sine", gain: 0.46 },
-        { frequency: 783.99, start: 0.18, duration: 0.26, type: "sine", gain: 0.4 }
-      ]
-    },
-    bell: {
-      master: 0.17,
-      notes: [
-        { frequency: 587.33, start: 0, duration: 0.34, type: "sine", gain: 0.42 },
-        { frequency: 880, start: 0.055, duration: 0.46, type: "triangle", gain: 0.3 }
-      ]
-    },
-    pop: {
-      master: 0.16,
-      notes: [
-        { frequency: 698.46, start: 0, duration: 0.1, type: "triangle", gain: 0.5 },
-        { frequency: 1046.5, start: 0.08, duration: 0.14, type: "sine", gain: 0.38 }
-      ]
-    }
-  };
-  const SUCCESS_SOUND_STYLES = new Set(Object.keys(SUCCESS_SOUND_PRESETS));
-  const SUCCESS_CELEBRATION_COLORS = ["#0f1419", "#536471", "#1d9bf0", "#00ba7c", "#cfd9de"];
+    STORAGE_RECORD_HISTORY,
+    STORAGE_DRAFT_QUEUE,
+    MAX_RECORD_HISTORY,
+    MAX_DRAFT_QUEUE,
+    MAX_DRAFT_QUEUE_STORAGE_BYTES,
+    MAX_DRAFT_QUEUE_ITEM_BYTES,
+    MAX_RECORD_MARKDOWN_CHARS,
+    X_ARTICLE_MEDIA_SOFT_LIMIT,
+    X_ARTICLE_MEDIA_HEADROOM_THRESHOLD,
+    X_ARTICLE_MEDIA_LIMIT_WARNING,
+    X_ARTICLE_MEDIA_HEADROOM_NOTE,
+    X_ARTICLE_MEDIA_CAPACITY_NOTE,
+    MARKDOWN_FILE_RE,
+    MARKDOWN_FILE_ACCEPT,
+    MARKDOWN_TRANSFER_MIME_RE,
+    MARKDOWN_LOAD_ERROR_TITLE,
+    MARKDOWN_LOAD_ERROR_DETAIL,
+    NO_NEW_DRAFTS_DETAIL,
+    DRAFT_EDITOR_MODES,
+    EDITOR_HISTORY_LIMIT,
+    DRAFT_SAVE_DELAY_MS,
+    DRAFT_ANALYZE_DELAY_MS,
+    RECORD_SEARCH_DELAY_MS,
+    STARTUP_DRAFT_ANALYZE_DELAY_MS,
+    STARTUP_IDLE_TIMEOUT_MS,
+    STARTUP_PAGE_STATE_TIMEOUT_MS,
+    STARTUP_STORAGE_KEYS,
+    SYNTAX_HIGHLIGHT_DETAIL_LIMIT,
+    THEME_MODES,
+    SUCCESS_SOUND_VOLUME,
+    SUCCESS_SOUND_PRESETS,
+    SUCCESS_SOUND_STYLES,
+    SUCCESS_CELEBRATION_COLORS,
+    CONTENT_VERSION_UNKNOWN,
+    EXTENSION_PATH
+  } = sidepanelConfig;
   const EXTENSION_VERSION =
     typeof chrome !== "undefined" && chrome.runtime?.getManifest
       ? chrome.runtime.getManifest().version
       : "dev";
-  const CONTENT_VERSION_UNKNOWN = "unknown";
-  const EXTENSION_PATH = "the folder you cloned or downloaded";
 
   let latestParsed = null;
   let latestCounts = shared.segmentCounts([]);
@@ -258,6 +74,7 @@
   let activeDraftRecordId = null;
   let activeDraftFingerprint = null;
   let activeDraftFinalized = false;
+  let activeDraftSourceFileName = "";
   let draftInputHistoryTimer = null;
   let draftSaveTimer = null;
   let draftAnalyzeTimer = null;
@@ -281,8 +98,8 @@
   let lastSuccessFeedbackKey = "";
   let draftEditorMode = "edit";
   let recordEditMode = "edit";
-  let draftEditorHistory = createEditorHistory();
-  let recordEditorHistory = createEditorHistory();
+  let draftEditorHistory = sidepanelEditor.createEditorHistory();
+  let recordEditorHistory = sidepanelEditor.createEditorHistory();
   let miniGfmRenderer = null;
   let runSummaryCollapseTimer = null;
   let draftDropStatusTimer = null;
@@ -299,6 +116,22 @@
     translatePatternText: (source) => source,
     reversePatternText: () => null
   };
+  const textareaEditor = sidepanelEditor.createTextareaEditor({
+    historyLimit: EDITOR_HISTORY_LIMIT,
+    getDefaultTextarea: () => els.markdown,
+    getHistory: (textarea) => textarea === els.recordEditTextarea ? recordEditorHistory : draftEditorHistory,
+    setHistory: (textarea, history) => {
+      if (textarea === els.recordEditTextarea) recordEditorHistory = history;
+      else draftEditorHistory = history;
+    }
+  });
+  const {
+    resetEditorHistory,
+    handleTextareaUndoShortcut,
+    syncProgrammaticUndoFallback,
+    clearProgrammaticHistoryOnTextInput,
+    applyTextareaCommand
+  } = textareaEditor;
 
   const hasChromeApi = () =>
     typeof chrome !== "undefined" && Boolean(chrome.storage?.local && chrome.tabs);
@@ -341,15 +174,52 @@
     return startupStoragePromise;
   }
 
+  function normalizeSourceFileName(value) {
+    return String(value || "").trim();
+  }
+
+  function titleCandidateOptions(options = {}) {
+    const titleCandidate = shared.markdownTitleCandidate?.(
+      options.titleCandidate || options.fallbackTitle || options.sourceTitle || ""
+    ) || "";
+    const sourceFileName = normalizeSourceFileName(options.sourceFileName || options.fileName);
+    const normalized = {};
+    if (titleCandidate) normalized.titleCandidate = titleCandidate;
+    if (sourceFileName) normalized.sourceFileName = sourceFileName;
+    return normalized;
+  }
+
   function normalizeImportOptions(options = {}) {
     return {
       setTitle: options.setTitle !== false,
-      setCover: options.setCover !== false
+      setCover: options.setCover !== false,
+      ...titleCandidateOptions(options)
     };
   }
 
-  function parseDraftMarkdown(markdown, options = importOptions) {
-    return shared.parseMarkdown(markdown, normalizeImportOptions(options));
+  function activeDraftParseOptions(options = importOptions) {
+    return normalizeImportOptions({
+      ...options,
+      sourceFileName: options.sourceFileName || options.fileName || activeDraftSourceFileName
+    });
+  }
+
+  function parseDraftMarkdown(markdown, options = null) {
+    return shared.parseMarkdown(markdown, options == null ? activeDraftParseOptions() : normalizeImportOptions(options));
+  }
+
+  function queueItemSourceFileName(id) {
+    if (!id) return "";
+    return normalizeSourceFileName(draftQueue.find((item) => item.id === id)?.fileName);
+  }
+
+  function activeWriteSourceFileName(fallback = "") {
+    return (
+      queueItemSourceFileName(activeWriteQueueItemId) ||
+      queueItemSourceFileName(activeQueueItemId) ||
+      normalizeSourceFileName(fallback) ||
+      normalizeSourceFileName(activeDraftSourceFileName)
+    );
   }
 
   function draftText() {
@@ -692,6 +562,7 @@
   }
 
   function handleDraftEditorInput({ pasted = false, event = null } = {}) {
+    activeDraftSourceFileName = "";
     syncProgrammaticUndoFallback(event, els.markdown);
     clearProgrammaticHistoryOnTextInput(event, els.markdown);
     renderDraftSyntaxHighlight();
@@ -718,172 +589,6 @@
       return;
     }
     scheduleDraftHistory("typed");
-  }
-
-  function textareaSelection(textarea = els.markdown) {
-    if (!textarea) return { start: 0, end: 0, selected: "" };
-    const start = Math.max(0, textarea.selectionStart || 0);
-    const end = Math.max(start, textarea.selectionEnd || start);
-    return {
-      start,
-      end,
-      selected: textarea.value.slice(start, end)
-    };
-  }
-
-  function createEditorHistory() {
-    return {
-      undo: [],
-      redo: [],
-      pending: null,
-      pendingTimer: null
-    };
-  }
-
-  function editorHistoryForTextarea(textarea) {
-    return textarea === els.recordEditTextarea ? recordEditorHistory : draftEditorHistory;
-  }
-
-  function resetEditorHistory(textarea) {
-    const previous = editorHistoryForTextarea(textarea);
-    if (previous?.pendingTimer) window.clearTimeout(previous.pendingTimer);
-    if (textarea === els.recordEditTextarea) recordEditorHistory = createEditorHistory();
-    else draftEditorHistory = createEditorHistory();
-  }
-
-  function editorSnapshot(textarea) {
-    const selection = textareaSelection(textarea);
-    return {
-      value: textarea?.value || "",
-      start: selection.start,
-      end: selection.end
-    };
-  }
-
-  function editorSnapshotsEqual(left, right) {
-    return Boolean(left && right) &&
-      left.value === right.value &&
-      left.start === right.start &&
-      left.end === right.end;
-  }
-
-  function pushEditorUndoSnapshot(textarea, snapshot = editorSnapshot(textarea)) {
-    if (!textarea) return;
-    const history = editorHistoryForTextarea(textarea);
-    if (editorSnapshotsEqual(history.undo[history.undo.length - 1], snapshot)) return;
-    history.undo.push(snapshot);
-    if (history.undo.length > EDITOR_HISTORY_LIMIT) history.undo.shift();
-    history.redo = [];
-  }
-
-  function restoreEditorSnapshot(textarea, snapshot, onChange) {
-    if (!textarea || !snapshot) return false;
-    textarea.value = snapshot.value;
-    const end = textarea.value.length;
-    textarea.setSelectionRange(Math.min(snapshot.start, end), Math.min(snapshot.end, end));
-    textarea.focus();
-    onChange?.();
-    return true;
-  }
-
-  function handleTextareaUndoShortcut(event, { textarea = event.target, onChange = handleDraftEditorInput } = {}) {
-    if (!textarea || event.defaultPrevented) return false;
-    if (!(event.metaKey || event.ctrlKey) || event.altKey) return false;
-    const key = String(event.key || "").toLowerCase();
-    const wantsUndo = key === "z" && !event.shiftKey;
-    const wantsRedo = key === "y" || (key === "z" && event.shiftKey);
-    if (!wantsUndo && !wantsRedo) return false;
-    const history = editorHistoryForTextarea(textarea);
-    const action = wantsRedo ? "redo" : "undo";
-    const stack = action === "redo" ? history.redo : history.undo;
-    if (!stack.length) return false;
-    const before = editorSnapshot(textarea);
-    if (history.pendingTimer) window.clearTimeout(history.pendingTimer);
-    history.pending = { action, before };
-    history.pendingTimer = window.setTimeout(() => {
-      history.pendingTimer = null;
-      if (!history.pending || history.pending.action !== action) return;
-      if (!editorSnapshotsEqual(editorSnapshot(textarea), before)) {
-        history.pending = null;
-        return;
-      }
-      const activeStack = action === "redo" ? history.redo : history.undo;
-      const next = activeStack.pop();
-      if (!next) return;
-      if (action === "redo") history.undo.push(before);
-      else history.redo.push(before);
-      restoreEditorSnapshot(textarea, next, onChange);
-      history.pending = null;
-    }, 80);
-    return false;
-  }
-
-  function syncProgrammaticUndoFallback(event, textarea) {
-    const action = event?.inputType === "historyRedo" ? "redo" : event?.inputType === "historyUndo" ? "undo" : "";
-    if (!textarea || !action) return;
-    const history = editorHistoryForTextarea(textarea);
-    const pending = history.pending?.action === action ? history.pending : null;
-    const stack = action === "redo" ? history.redo : history.undo;
-    const current = editorSnapshot(textarea);
-    const expected = stack[stack.length - 1];
-    if (expected?.value === current.value) {
-      stack.pop();
-      if (pending?.before && !editorSnapshotsEqual(pending.before, current)) {
-        if (action === "redo") history.undo.push(pending.before);
-        else history.redo.push(pending.before);
-      }
-    }
-    if (pending) {
-      if (history.pendingTimer) window.clearTimeout(history.pendingTimer);
-      history.pendingTimer = null;
-      history.pending = null;
-    }
-  }
-
-  function clearProgrammaticHistoryOnTextInput(event, textarea) {
-    if (!textarea || !event?.inputType || event.inputType === "historyUndo" || event.inputType === "historyRedo") return;
-    const history = editorHistoryForTextarea(textarea);
-    history.undo = [];
-    history.redo = [];
-    if (history.pendingTimer) window.clearTimeout(history.pendingTimer);
-    history.pendingTimer = null;
-    history.pending = null;
-  }
-
-  function replaceTextareaSelection(text, selectStart = 0, selectEnd = text.length, { textarea = els.markdown, onChange = handleDraftEditorInput } = {}) {
-    if (!textarea) return;
-    pushEditorUndoSnapshot(textarea);
-    const { start, end } = textareaSelection(textarea);
-    textarea.setRangeText(text, start, end, "end");
-    textarea.focus();
-    textarea.setSelectionRange(start + selectStart, start + selectEnd);
-    onChange?.();
-  }
-
-  function surroundTextareaSelection(before, after = before, options = {}) {
-    const { selected } = textareaSelection(options.textarea || els.markdown);
-    replaceTextareaSelection(`${before}${selected}${after}`, before.length, before.length + selected.length, options);
-  }
-
-  function insertAtCurrentLine(prefix, { textarea = els.markdown, onChange = handleDraftEditorInput } = {}) {
-    if (!textarea) return;
-    pushEditorUndoSnapshot(textarea);
-    const position = Math.max(0, textarea.selectionStart || 0);
-    const lineStart = textarea.value.lastIndexOf("\n", position - 1) + 1;
-    textarea.setRangeText(prefix, lineStart, lineStart, "end");
-    textarea.focus();
-    textarea.setSelectionRange(position + prefix.length, position + prefix.length);
-    onChange?.();
-  }
-
-  function applyTextareaCommand(command, options = {}) {
-    if (command === "bold") surroundTextareaSelection("**", "**", options);
-    else if (command === "italic") surroundTextareaSelection("_", "_", options);
-    else if (command === "heading") insertAtCurrentLine("## ", options);
-    else if (command === "code") surroundTextareaSelection("`", "`", options);
-    else if (command === "link") replaceTextareaSelection("[link text](https://)", 1, 10, options);
-    else if (command === "image") replaceTextareaSelection("![alt text](https://)", 2, 10, options);
-    else if (command === "table") replaceTextareaSelection("| Column | Value |\n| --- | --- |\n|  |  |\n", 34, 34, options);
   }
 
   function setDraftEditorMode(mode = "edit") {
@@ -955,7 +660,7 @@
 
   function runDraftEditorCommand(command) {
     setDraftEditorMode("edit");
-    applyTextareaCommand(command);
+    applyTextareaCommand(command, { onChange: handleDraftEditorInput });
     focusDraftTextEditor();
   }
 
@@ -963,9 +668,12 @@
     return normalizeImportOptions(importOptions);
   }
 
-  function writeOptionsPayload({ forceNewArticle = false } = {}) {
+  function writeOptionsPayload({ forceNewArticle = false, sourceFileName = "" } = {}) {
     return {
-      ...importOptionsPayload(),
+      ...normalizeImportOptions({
+        ...importOptions,
+        sourceFileName
+      }),
       forceNewArticle: Boolean(forceNewArticle)
     };
   }
@@ -1954,7 +1662,10 @@
   }
 
   function parseMarkdownForWrite(markdown) {
-    const parsed = parseDraftMarkdown(markdown);
+    const parsed = parseDraftMarkdown(markdown, {
+      ...importOptions,
+      sourceFileName: activeWriteSourceFileName()
+    });
     const counts = shared.segmentCounts(parsed.segments);
     latestParsed = parsed;
     latestCounts = counts;
@@ -2097,7 +1808,7 @@
 
   function markdownQueueTitle(markdown, fallback = "Untitled Markdown") {
     try {
-      const parsed = parseDraftMarkdown(markdown || "");
+      const parsed = parseDraftMarkdown(markdown || "", { sourceFileName: fallback });
       if (parsed.title) return parsed.title;
       const heading = String(markdown || "").match(/^\s*#\s+(.+)$/m)?.[1]?.trim();
       return heading || fallback;
@@ -2149,7 +1860,7 @@
     const text = draftText();
     if (!text.trim()) return null;
     return createQueueItemFromMarkdown(text, {
-      fileName: "",
+      fileName: activeDraftSourceFileName,
       source: "typed",
       id: queueItemId("queue-current")
     });
@@ -2187,6 +1898,7 @@
     const activeItem = draftQueue.find((item) => item.id === activeQueueItemId);
     if (activeItem && activeItem.markdown === text) return;
     activeQueueItemId = null;
+    activeDraftSourceFileName = "";
     draftQueue = draftQueue.map((item) => item.status === "loaded" ? { ...item, status: "queued" } : item);
     markDraftQueueMediaStale();
     persistDraftQueue();
@@ -2265,7 +1977,7 @@
       title: "",
       estimate: null
     };
-    const estimate = mediaUploadEstimate(parseDraftMarkdown(item?.markdown || ""));
+    const estimate = mediaUploadEstimate(parseDraftMarkdown(item?.markdown || "", { ...importOptions, sourceFileName: item?.fileName || "" }));
     const values = mediaNoteValues(estimate);
     if (estimate.overSoftLimit) {
       return {
@@ -2381,6 +2093,8 @@
       : [];
     draftQueueMediaReady = !draftQueue.length;
     activeQueueItemId = draftQueue.find((item) => item.status === "loaded")?.id || activeQueueItemId;
+    if (activeQueueItemId && !draftQueue.some((item) => item.id === activeQueueItemId)) activeQueueItemId = null;
+    activeDraftSourceFileName = queueItemSourceFileName(activeQueueItemId);
     renderDraftQueue();
   }
 
@@ -2388,6 +2102,7 @@
     const restored = String(value || "");
     if (queueModeActive()) {
       const activeItem = draftQueue.find((item) => item.id === activeQueueItemId) || draftQueue[0];
+      activeDraftSourceFileName = normalizeSourceFileName(activeItem?.fileName);
       suppressNextTypedHistory = true;
       window.clearTimeout(draftInputHistoryTimer);
       setDraftText(activeItem?.markdown || "", { preview: false, parseStatus: false, syntax: "defer" });
@@ -2399,6 +2114,7 @@
       restoreSingleDraftMarkdown(restored, { analyze });
       return;
     }
+    activeDraftSourceFileName = "";
     setDraftText("", { parseStatus: false });
     if (analyze) analyzeDraft();
     else {
@@ -2423,6 +2139,7 @@
     activeQueueItemId = null;
     draftQueue = [];
     draftQueueMediaReady = true;
+    activeDraftSourceFileName = "";
     setDraftText(text, { preview: false, parseStatus: false, syntax: "defer" });
     if (analyze) saveDraft();
     syncDraftSurface();
@@ -2440,6 +2157,7 @@
     activeQueueItemId = null;
     draftQueue = [];
     draftQueueMediaReady = true;
+    activeDraftSourceFileName = normalizeSourceFileName(fileName);
     persistDraftQueue();
     suppressNextTypedHistory = true;
     window.clearTimeout(draftInputHistoryTimer);
@@ -2597,10 +2315,14 @@
     const wasActive = activeQueueItemId === id;
     draftQueue = draftQueue.filter((entry) => entry.id !== id);
     markDraftQueueMediaStale();
-    if (wasActive) activeQueueItemId = null;
+    if (wasActive) {
+      activeQueueItemId = null;
+      activeDraftSourceFileName = "";
+    }
     if (!draftQueue.length) {
       suppressNextTypedHistory = true;
       window.clearTimeout(draftInputHistoryTimer);
+      activeDraftSourceFileName = "";
       setDraftText("");
       saveDraft();
       analyzeDraft();
@@ -2615,6 +2337,7 @@
       const nextItem = draftQueue[Math.min(index, draftQueue.length - 1)];
       loadQueueItem(nextItem.id, { persist: false, remember: false });
     } else {
+      activeDraftSourceFileName = queueItemSourceFileName(activeQueueItemId);
       renderDraftQueue();
       updateWriteButton();
     }
@@ -2628,6 +2351,7 @@
     const item = draftQueue.find((entry) => entry.id === id);
     if (!item) return false;
     activeQueueItemId = item.id;
+    activeDraftSourceFileName = normalizeSourceFileName(item.fileName);
     draftQueue = draftQueue.map((entry) => entry.id === item.id
       ? { ...entry, status: entry.status === "written" ? "written" : "loaded", loadedAt: new Date().toISOString() }
       : entry.status === "loaded" ? { ...entry, status: "queued" } : entry);
@@ -2663,10 +2387,13 @@
     if (!draftQueue.length) {
       suppressNextTypedHistory = true;
       window.clearTimeout(draftInputHistoryTimer);
+      activeDraftSourceFileName = "";
       setDraftText("");
       saveDraft();
       analyzeDraft();
       setDraftDropStatus("Markdown draft", "Paste Markdown here, choose a file, or drop .md files.", "idle");
+    } else {
+      activeDraftSourceFileName = queueItemSourceFileName(activeQueueItemId);
     }
     persistDraftQueue();
     renderDraftQueue();
@@ -2698,6 +2425,7 @@
     draftQueue = draftQueue.map((entry) => entry.id === id ? updated : entry);
     markDraftQueueMediaStale();
     if (id === activeQueueItemId) {
+      activeDraftSourceFileName = normalizeSourceFileName(updated.fileName);
       suppressNextTypedHistory = true;
       window.clearTimeout(draftInputHistoryTimer);
       setDraftText(text);
@@ -3106,9 +2834,7 @@
         indexLabel: "T",
         kind: "title",
         label: "Article title",
-        detail: parsed.titleFromMeta
-          ? `Frontmatter title will be applied: ${parsed.title}`
-          : `First H1 was promoted to article title: ${parsed.title}`,
+        detail: titleLedgerDetail(parsed),
         path: "Title and cover",
         tone: bridgeReady ? "ok" : "warn"
       });
@@ -3269,6 +2995,14 @@
     return cleaned.length > 110 ? `${cleaned.slice(0, 107)}...` : cleaned;
   }
 
+  function titleLedgerDetail(parsed = latestParsed) {
+    const title = truncateLedgerText(parsed?.title || "");
+    if (!title) return "No article title will be applied.";
+    if (parsed?.titleFromMeta) return `Frontmatter title will be applied: ${title}`;
+    if (parsed?.titleFromCandidate) return `File name will be used as article title: ${title}`;
+    return `First H1 was promoted to article title: ${title}`;
+  }
+
   function buildConversionMap(parsed, counts) {
     const empty = !parsed?.segments?.length;
     const metadataOptions = importOptionsPayload();
@@ -3306,8 +3040,10 @@
         tone: metadataOptions.setTitle ? (parsed.title ? "ok" : "warn") : "idle",
         detail: metadataOptions.setTitle
           ? parsed.title
-            ? "Will set the X Article title when possible."
-            : "Add frontmatter title or a first H1."
+            ? parsed.titleFromCandidate
+              ? "Will use the source file name as the X Article title when possible."
+              : "Will set the X Article title when possible."
+            : "Add frontmatter title, a first H1, or load from a named file."
           : "Title setting is off; headings stay in the article body.",
         count: metadataOptions.setTitle && parsed.title ? 1 : 0
       },
@@ -3446,8 +3182,9 @@
     const uploadCount = (counts.image || 0) + (counts.table || 0);
 
     if (!metadataOptions.setTitle) notes.push({ tone: "idle", text: "Title setting is off; headings stay in the article body." });
+    else if (parsed.titleFromCandidate) notes.push({ tone: "ok", text: `Title will use file name: ${parsed.title}` });
     else if (parsed.title) notes.push({ tone: "ok", text: `Title detected: ${parsed.title}` });
-    else notes.push({ tone: "warn", text: "No title detected. Add frontmatter title or a first-level heading." });
+    else notes.push({ tone: "warn", text: "No title detected. Add frontmatter title, a first-level heading, or load the draft from a named file." });
 
     if (!metadataOptions.setCover) {
       notes.push({ tone: "idle", text: "Cover setting is off; images stay in the article body." });
@@ -3752,7 +3489,7 @@
             ? "Write all drafts"
             : hasDraft
               ? "Write to X draft"
-              : "Add Markdown first"
+              : "Add Markdown"
     );
     if (els.importHint) {
       const hint = compactWriteHint({ hasDraft, hasQueue, busy: busy || batchWriting });
@@ -4408,6 +4145,8 @@
           title: latestParsed.title || null,
           cover: latestParsed.cover || null,
           titleFromMeta: Boolean(latestParsed.titleFromMeta),
+          titleFromCandidate: Boolean(latestParsed.titleFromCandidate),
+          titleSource: latestParsed.titleSource || null,
           counts: latestCounts,
           blocks: latestParsed.segments.length,
           localImages: localImageReferences(latestParsed)
@@ -4428,6 +4167,8 @@
           title: null,
           cover: null,
           titleFromMeta: false,
+          titleFromCandidate: false,
+          titleSource: null,
           counts: shared.segmentCounts([]),
           blocks: 0,
           localImages: [],
@@ -5445,12 +5186,13 @@
     };
   }
 
-  async function importMarkdownDraft(markdownInput, { queueItemId = null, batch = false } = {}) {
+  async function importMarkdownDraft(markdownInput, { queueItemId = null, batch = false, sourceFileName = "" } = {}) {
     const markdown = String(markdownInput || "").trim();
     if (!markdown) {
       log("Paste or load Markdown first.");
       return { ok: false, error: "empty" };
     }
+    const writeSourceFileName = activeWriteSourceFileName(sourceFileName);
     activeWriteQueueItemId = queueItemId;
     if (queueItemId) {
       draftQueue = draftQueue.map((item) => item.id === queueItemId ? { ...item, status: "writing" } : item);
@@ -5538,7 +5280,7 @@
     const response = await sendToActiveTab({
       type: "xposter:import-markdown",
       markdown,
-      options: writeOptionsPayload({ forceNewArticle: batch })
+      options: writeOptionsPayload({ forceNewArticle: batch, sourceFileName: writeSourceFileName })
     });
     importCancelRequested = false;
     if (response?.ok) {
@@ -5580,20 +5322,21 @@
   }
 
   async function importDraft() {
-    return importMarkdownDraft(draftText());
+    return importMarkdownDraft(draftText(), { sourceFileName: activeDraftSourceFileName });
   }
 
   async function importQueueItem(id) {
     const item = draftQueue.find((entry) => entry.id === id);
     if (!item) return { ok: false, error: "Queued draft not found" };
     activeQueueItemId = item.id;
+    activeDraftSourceFileName = normalizeSourceFileName(item.fileName);
     suppressNextTypedHistory = true;
     window.clearTimeout(draftInputHistoryTimer);
     setDraftText(item.markdown);
     saveDraft();
     analyzeDraft();
     renderDraftQueue();
-    return importMarkdownDraft(item.markdown, { queueItemId: item.id, batch: batchWriting });
+    return importMarkdownDraft(item.markdown, { queueItemId: item.id, batch: batchWriting, sourceFileName: item.fileName });
   }
 
   async function importDraftQueue() {
@@ -6147,6 +5890,7 @@
         : [];
       markDraftQueueMediaStale();
       if (activeQueueItemId && !draftQueue.some((item) => item.id === activeQueueItemId)) activeQueueItemId = null;
+        activeDraftSourceFileName = queueItemSourceFileName(activeQueueItemId);
         if (draftQueue.length > previousLength) {
           markQueueItemsEntered(draftQueue.filter((item) => !previousIds.has(item.id)));
         }

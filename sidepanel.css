@@ -2937,9 +2937,9 @@ textarea:focus-visible,
   }
   50% {
     box-shadow:
-      inset 0 0 0 1px color-mix(in oklch, var(--ink), transparent 88%),
-      0 0 0 4px color-mix(in oklch, var(--ink), transparent 96%);
-    transform: scale(0.998);
+      inset 0 0 0 1px color-mix(in oklch, var(--signal), transparent 72%),
+      0 0 0 6px color-mix(in oklch, var(--signal), transparent 92%);
+    transform: scale(1.006);
   }
 }
 
@@ -3290,7 +3290,7 @@ textarea:focus-visible,
 
 .actions[data-empty="true"] {
   display: grid;
-  border-color: color-mix(in oklch, var(--line), var(--ink) 16%);
+  border-color: color-mix(in oklch, var(--line), var(--signal) 12%);
   background: var(--paper);
 }
 
@@ -3390,23 +3390,21 @@ textarea:focus-visible,
 }
 
 .actions[data-empty="true"] .primary {
-  justify-content: flex-start;
-  border: 1px dashed color-mix(in oklch, var(--ink), transparent 42%);
-  background:
-    radial-gradient(circle at 16px 50%, color-mix(in oklch, var(--ink), transparent 92%), transparent 28px),
-    var(--paper);
-  color: var(--ink);
+  justify-content: center;
+  border: 1px solid color-mix(in oklch, var(--signal), var(--line) 42%);
+  background: color-mix(in oklch, var(--signal), var(--paper) 94%);
+  color: color-mix(in oklch, var(--signal-text), var(--ink) 10%);
   box-shadow: none;
-  text-align: left;
+  text-align: center;
 }
 
 .actions[data-empty="true"] .primary:hover {
-  border-color: var(--ink);
-  background: color-mix(in oklch, var(--paper-2), var(--paper) 52%);
+  border-color: color-mix(in oklch, var(--signal), var(--line) 22%);
+  background: color-mix(in oklch, var(--signal), var(--paper) 89%);
 }
 
 .actions[data-empty="true"] .primary svg {
-  color: var(--muted);
+  color: currentColor;
 }
 
 .secondary:disabled {

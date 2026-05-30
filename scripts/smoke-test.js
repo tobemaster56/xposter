@@ -47,6 +47,9 @@ const requiredFiles = [
   "src/content.js",
   "src/main-world.js",
   "src/shared.js",
+  "src/sidepanel-config.js",
+  "src/sidepanel-elements.js",
+  "src/sidepanel-editor.js",
   "src/sidepanel-messages.js",
   "src/sidepanel-patterns.js",
   "fixtures/live-x-smoke.md",
@@ -106,6 +109,15 @@ const frontmatterOnlyCoverDraft = [
 ].join("\n");
 const frontmatterOnlyCoverParsed = shared.parseMarkdown(frontmatterOnlyCoverDraft);
 const h1TitleDisabledParsed = shared.parseMarkdown("# Keep this heading\n\nBody text.", { setTitle: false });
+const fileTitleParsed = shared.parseMarkdown("Body text only", { sourceFileName: "Campaign Notes.md" });
+const fileTitlePathParsed = shared.parseMarkdown("Body text only", { sourceFileName: "/tmp/nested/Product Plan.markdown?download=1" });
+const explicitTitleCandidateParsed = shared.parseMarkdown("Body text only", {
+  sourceFileName: "file-name.md",
+  titleCandidate: "Manual Candidate"
+});
+const frontmatterTitleBeatsFileParsed = shared.parseMarkdown("---\ntitle: Meta Title\n---\n\nBody text.", { sourceFileName: "File Title.md" });
+const headingTitleBeatsFileParsed = shared.parseMarkdown("# Heading Title\n\nBody text.", { sourceFileName: "File Title.md" });
+const disabledFileTitleParsed = shared.parseMarkdown("Body text only", { setTitle: false, sourceFileName: "Campaign Notes.md" });
 const coverDisabledParsed = shared.parseMarkdown("![cover](https://images.example.test/path/cover.png)\n\nBody text.", {
   setCover: false
 });
@@ -127,6 +139,10 @@ const contentScriptText = readText("src/content.js");
 const backgroundText = readText("src/background.js");
 const mainWorldText = readText("src/main-world.js");
 const sidepanelText = readText("sidepanel.js");
+const sidepanelConfigText = readText("src/sidepanel-config.js");
+const sidepanelElementsText = readText("src/sidepanel-elements.js");
+const sidepanelEditorText = readText("src/sidepanel-editor.js");
+const sidepanelRuntimeText = [sidepanelConfigText, sidepanelElementsText, sidepanelEditorText, sidepanelText].join("\n");
 const sidepanelMessagesText = readText("src/sidepanel-messages.js");
 const sidepanelPatternsText = readText("src/sidepanel-patterns.js");
 const sidepanelHtml = readText("sidepanel.html");
@@ -168,13 +184,17 @@ vm.runInNewContext(
      "Writing article": "正在写入文章",
      "Preparing Markdown...": "正在准备 Markdown...",
      "Copy Markdown": "复制 Markdown",
+     "Download Markdown": "下载 Markdown",
+     "Copy MD": "复制 MD",
+     "Download MD": "下载 MD",
+     "Export Markdown": "导出 Markdown",
      "Queue Markdown drafts": "加入 Markdown 草稿队列",
      "Release to add them to the xPoster side panel.": "松开后加入 xPoster 侧边栏。"
    }));
    const CONTENT_EN_TEXT = new Map(Array.from(CONTENT_ZH_TEXT.entries()).map(([en, zh]) => [zh, en]));
    ${contentScriptText.slice(statusHelperStart, statusHelperEnd)}
    this.state = state;
-   this.statusHelpers = { statusThemeFromPage, statusProgressForText, translateContentText, articleExportLabel };`,
+   this.statusHelpers = { statusThemeFromPage, statusProgressForText, translateContentText, articleExportLabel, articleExportShortLabel };`,
   statusSandbox
 );
 vm.runInNewContext(
@@ -201,6 +221,16 @@ assert.equal(
   "header-one",
   "disabled title extraction should keep the first H1 in the body"
 );
+assert.equal(fileTitleParsed.title, "Campaign Notes", "named Markdown files should provide a fallback article title");
+assert.equal(fileTitleParsed.titleFromCandidate, true, "filename fallback titles should be marked as candidates");
+assert.equal(fileTitleParsed.titleSource, "candidate", "filename fallback titles should expose their source");
+assert.equal(fileTitlePathParsed.title, "Product Plan", "filename title fallback should strip paths, queries, and Markdown extensions");
+assert.equal(explicitTitleCandidateParsed.title, "Manual Candidate", "explicit title candidates should beat filename candidates");
+assert.equal(frontmatterTitleBeatsFileParsed.title, "Meta Title", "frontmatter titles should beat filename candidates");
+assert.equal(frontmatterTitleBeatsFileParsed.titleFromMeta, true, "frontmatter title source should be preserved");
+assert.equal(headingTitleBeatsFileParsed.title, "Heading Title", "first H1 should beat filename candidates");
+assert.equal(headingTitleBeatsFileParsed.titleSource, "heading", "heading title source should be preserved");
+assert.equal(disabledFileTitleParsed.title, null, "disabled title extraction should not use filename candidates");
 assert.equal(coverDisabledParsed.cover, null, "cover setting can disable cover extraction");
 assert.equal(
   coverDisabledParsed.segments.filter((segment) => segment.type === "image").length,
@@ -273,6 +303,37 @@ assert.ok(
   "content script runtime messages should not throw uncaught errors after extension reloads"
 );
 assert.ok(
+  includesAll(contentScriptText, [
+    "function titleCandidateOptions",
+    "options.titleCandidate || options.fallbackTitle || options.sourceTitle",
+    "sourceFileName: pending?.fileName || sourceFileName",
+    "sourceFileName: stored?.fileName || sourceFileName",
+    "preflightArticleMediaLimit(text, { sourceFileName })",
+    "preflightArticleMediaLimit(pending.markdown, { sourceFileName })",
+    "return importMarkdown(text, origin, { sourceFileName: file.name || \"\" });",
+    "return importMarkdown(pending?.markdown || markdown, pending?.source || source, { sourceFileName: pendingSourceFileName });",
+    "const parsed = shared.parseMarkdown(markdown || \"\", { sourceFileName: fallback });"
+  ]),
+  "content script should preserve source filenames through direct Markdown file imports, pending navigation, preflight, and side-panel queue titles"
+);
+assert.ok(
+  includesAll(sidepanelText, [
+    "let activeDraftSourceFileName = \"\";",
+    "function activeWriteSourceFileName",
+    "activeDraftSourceFileName = normalizeSourceFileName(fileName);",
+    "activeDraftSourceFileName = normalizeSourceFileName(item.fileName);",
+    "sourceFileName: activeWriteSourceFileName()",
+    "sourceFileName: writeSourceFileName",
+    "return importMarkdownDraft(draftText(), { sourceFileName: activeDraftSourceFileName });",
+    "sourceFileName: item.fileName",
+    "function titleLedgerDetail",
+    "parsed?.titleFromCandidate",
+    "File name will be used as article title",
+    "Title will use file name"
+  ]),
+  "side panel should preserve source filenames through draft analysis, queue writes, actual write options, and title review copy"
+);
+assert.ok(
   contentScriptText.includes("uploadDroppedImageUrl"),
   "content script should keep the explicit image insertion path available"
 );
@@ -281,47 +342,80 @@ assert.ok(
   "drop hint should expose an image drop mode"
 );
 assert.ok(
-  contentScriptText.includes("function dropSurfaceRect(intent") &&
-    contentScriptText.includes("function updateDropHintSurface(hint, intent") &&
-    contentScriptText.includes("--xposter-drop-surface-left") &&
-    contentScriptText.includes("--xposter-drop-surface-width") &&
-    contentScriptText.includes('data-surface="page-dock"') &&
-    contentScriptText.includes("function pageDropDockSurfaceRect") &&
-    contentScriptText.includes("function articleBodyDropDockRect") &&
-    contentScriptText.includes("width: window.innerWidth") &&
-    contentScriptText.includes("height = Math.min(96") &&
-    contentScriptText.includes("function dropHintSurfaceKind") &&
-    contentScriptText.includes('if (intent === "article") return "page-dock";') &&
-    contentScriptText.includes("--xposter-drop-signal: #1d9bf0") &&
-    contentScriptText.includes("--xposter-drop-signal-text: #0f6cbf") &&
-    contentScriptText.includes('[data-mode="markdown"][data-surface="page-dock"]::before') &&
-    contentScriptText.includes("linear-gradient(90deg, var(--xposter-drop-signal-text), var(--xposter-drop-signal) 52%, #0f7acb)") &&
-    contentScriptText.includes("color: #ffffff;") &&
-    contentScriptText.includes("__xposter_drop_text_focus") &&
-    contentScriptText.includes(".__xposter_drop_status") &&
-    contentScriptText.includes("function dropHintStatusLabel") &&
-    contentScriptText.includes("grid-template-columns: 34px minmax(0, 1fr) auto;") &&
-    contentScriptText.includes('[data-mode="markdown"][data-surface="page-dock"] strong') &&
-    contentScriptText.includes('[data-mode="markdown"][data-surface="page-dock"] p') &&
-    contentScriptText.includes("__xposter_drop_rail") &&
-    contentScriptText.includes("__xposter_drop_mark_hint") &&
-    contentScriptText.includes('[data-mode="markdown"][data-state="ready"] .__xposter_drop_mark') &&
-    contentScriptText.includes("--xposter-drop-progress") &&
-    contentScriptText.includes("Open X Article draft") &&
-    contentScriptText.includes("Write to this X Article") &&
-    contentScriptText.includes("Release in the bottom bar to write this Markdown here.") &&
-    contentScriptText.includes("xPoster page drop target") &&
-    contentScriptText.includes("function setDropHintProcessing") &&
-    contentScriptText.includes("updateVisibleDropHintCopy") &&
-    contentScriptText.includes('translateContentText("xPoster page drop target")') &&
-    contentScriptText.includes("function isDropEventOverSurface(event, intent") &&
-    contentScriptText.includes("function dropIntentForTransfer") &&
-    contentScriptText.includes("function sidePanelMarkdownDropIntent") &&
-    contentScriptText.includes("function isExplicitImageInsertDrop") &&
-    contentScriptText.includes("function hasImageDropPayload") &&
-    contentScriptText.includes("function articleBodyHasFocus") &&
-    contentScriptText.includes('event.dataTransfer.dropEffect = "copy"'),
-  "X page Markdown drag feedback should use the same bottom full-width dock on home and Article editor pages while image/folder targets keep a short editor dock"
+  includesAll(contentScriptText, [
+    "function dropSurfaceRect(intent",
+    "function updateDropHintSurface(hint, intent",
+    "--xposter-drop-surface-left",
+    "--xposter-drop-surface-width",
+    'data-surface="page-dock"',
+    "function pageDropDockSurfaceRect",
+    "function articleBodyDropDockRect",
+    "width: window.innerWidth",
+    "height = Math.min(168, Math.max(128, Math.round(window.innerHeight * 0.18)))",
+    "height = Math.min(96",
+    "function dropHintSurfaceKind",
+    'if (intent === "article") return "page-dock";',
+    'if (intent === "folder") return "page-dock";',
+    "Drop image folder here",
+    "Release to connect this folder for local images.",
+    "Drop the folder into the blue folder area.",
+    "Connecting image folder...",
+    "Preparing local image access.",
+    "directoryItem && !isDropEventOverSurface(event, \"folder\")",
+    "findDirectoryTransferItem(dataTransfer) && isEditorRoute() && findEditor()",
+    "--xposter-drop-signal: #1d9bf0",
+    "--xposter-drop-signal-text: #0f6cbf",
+    "height: var(--xposter-drop-surface-height, 132px)",
+    "border: 1px solid rgba(29, 155, 240, 0.42)",
+    "border: 1.5px dashed rgba(29, 155, 240, 0.48)",
+    "linear-gradient(180deg, rgba(238, 249, 255, 0.98), rgba(217, 240, 255, 0.97))",
+    '[data-mode="markdown"][data-surface="page-dock"]::before',
+    '[data-mode="folder"][data-surface="page-dock"]::before',
+    '[data-mode="folder"][data-surface="page-dock"]::after',
+    '[data-mode="folder"][data-surface="page-dock"] .__xposter_drop_frame',
+    '[data-mode="folder"][data-surface="page-dock"] strong',
+    '[data-mode="folder"][data-surface="page-dock"] p',
+    '[data-mode="folder"][data-surface="page-dock"] .__xposter_drop_mark',
+    "__xposter_folder_drop_hint",
+    "__xposter_drop_dock_receive",
+    "__xposter_drop_dock_breathe",
+    '[data-surface="page-dock"][data-state="ready"]::before',
+    '[data-surface="page-dock"][data-state="ready"]::after',
+    "transform-origin: 50% 100%",
+    "will-change: transform, box-shadow, opacity",
+    "transform: translateY(-2px) scale(1.006, 1.035)",
+    "transform: translateY(-4px) scale(1.012, 1.055)",
+    "transform: translateY(-1px) scale(1.08)",
+    "color: #063b63;",
+    ".__xposter_drop_status",
+    "function dropHintStatusLabel",
+    "grid-template-columns: 34px minmax(0, 1fr) auto;",
+    '[data-mode="markdown"][data-surface="page-dock"] strong',
+    '[data-mode="markdown"][data-surface="page-dock"] p',
+    "__xposter_drop_mark_hint",
+    '[data-mode="markdown"][data-state="ready"] .__xposter_drop_mark',
+    "Open X Article draft",
+    "Write to this X Article",
+    "Release in the bottom bar to write this Markdown here.",
+    "xPoster page drop target",
+    "function setDropHintProcessing",
+    "updateVisibleDropHintCopy",
+    'translateContentText("xPoster page drop target")',
+    "function isDropEventOverSurface(event, intent",
+    "function dropIntentForTransfer",
+    "function sidePanelMarkdownDropIntent",
+    "function isExplicitImageInsertDrop",
+    "function hasImageDropPayload",
+    "function articleBodyHasFocus",
+    'event.dataTransfer.dropEffect = "copy"'
+  ]) &&
+    excludesAll(contentScriptText, [
+      "__xposter_drop_text_focus",
+      "__xposter_drop_rail",
+      "color: #ffffff;",
+      "linear-gradient(90deg, var(--xposter-drop-signal-text), var(--xposter-drop-signal) 52%, #0f7acb)"
+    ]),
+  "X page drag feedback should use a taller light-blue bottom dock with blue outline, explicit folder drop copy, and reduced motion coverage"
 );
 assert.ok(
   contentScriptText.includes("if (!event?.altKey) return false;") &&
@@ -347,50 +441,88 @@ assert.ok(
     contentScriptText.includes("async function resumePendingArticleImport") &&
     contentScriptText.includes('safeRuntimeSendMessage({ type: "xposter:open-articles" })') &&
     !contentScriptText.includes("function hasSingleUnknownFileItem") &&
-    contentScriptText.includes("if (files.length > 1) return \"sidepanel-queue\";") &&
-    contentScriptText.includes("if (files.length === 1) return \"\";") &&
+    contentScriptText.includes("function transferFilesFromDataTransfer") &&
+    contentScriptText.includes("typeof item.getAsFile !== \"function\"") &&
+    contentScriptText.includes("function markdownTransferFileCount") &&
+    contentScriptText.includes("const markdownFileCount = markdownTransferFileCount(dataTransfer);") &&
+    contentScriptText.includes("if (markdownFileCount > 1) return \"sidepanel-queue\";") &&
+    contentScriptText.includes("if (markdownFileCount === 1) return \"\";") &&
+    contentScriptText.includes("function hasUnmaterializedFileDrop") &&
+    contentScriptText.includes("isDropEventOverSurface(event, \"sidepanel-queue\")") &&
+    contentScriptText.includes("intent !== \"sidepanel-queue\"") &&
     contentScriptText.includes("const panelPromise = safeRuntimeSendMessage({ type: \"xposter:open-side-panel\" }).catch(() => {})") &&
     contentScriptText.includes("await queueMarkdownFilesForSidePanel(markdownFiles, { openPanelPromise: panelPromise })"),
-  "X page drops should open single Markdown files in X Articles and queue multiple Markdown files in the side panel"
+  "X page drops should open single Markdown files in X Articles and robustly queue multiple Markdown files in the side panel"
 );
 assert.ok(
-  contentScriptText.includes('const ARTICLE_EXPORT_ID = "__xposter_article_export__"') &&
-    contentScriptText.includes('const ARTICLE_EXPORT_SETTINGS_STORAGE_KEY = "xposter_article_export_settings"') &&
-    contentScriptText.includes('enabled: settings.enabled !== false') &&
-    contentScriptText.includes('function installArticleExportButton') &&
-    contentScriptText.includes('function extractReadableXArticle') &&
-    contentScriptText.includes("const ARTICLE_EXPORT_LONGFORM_SELECTOR") &&
-    contentScriptText.includes("function hasReadableArticleSignal") &&
-    contentScriptText.includes("function containerHasReadableArticleSignal") &&
-    contentScriptText.includes("function articleExportMediaLinks") &&
-    contentScriptText.includes("if (!hasReadableArticleSignal()) return null;") &&
-    contentScriptText.includes("longformRoots") &&
-    contentScriptText.includes("articleRoots") &&
-    contentScriptText.includes("if (!containerHasReadableArticleSignal(container)) return null;") &&
-    contentScriptText.includes('function markdownForArticleNode') &&
-    contentScriptText.includes('navigator.clipboard.writeText(text)') &&
-    contentScriptText.includes('link.download = fileName || articleFileName("")') &&
-    contentScriptText.includes('await setArticleExportMode(button.dataset.exportMode)') &&
-    contentScriptText.includes("signalArticleExportFeedback(root, \"done\")") &&
-    contentScriptText.includes('main.textContent = translateContentText("Markdown")') &&
-    contentScriptText.includes('main.title = title') &&
-    contentScriptText.includes("position: fixed") &&
-    contentScriptText.includes("right: var(--__xposter-article-export-inline-end, 24px)") &&
-    contentScriptText.includes("function articleDockInlineEnd") &&
-    contentScriptText.includes("min-width: 76px") &&
-    contentScriptText.includes("--__xposter-export-paper: #ffffff") &&
-    contentScriptText.includes("border: 1px solid var(--__xposter-export-line)") &&
-    contentScriptText.includes("background: var(--__xposter-export-paper)") &&
-    contentScriptText.includes("opacity: 0.86") &&
-    !contentScriptText.includes("backdrop-filter: blur") &&
-    !contentScriptText.includes('[data-xposter-article-export-host="true"]') &&
-    contentScriptText.includes('const LANGUAGE_STORAGE_KEY = "xposter_language"') &&
-    contentScriptText.includes("function restoreContentLanguage") &&
-    contentScriptText.includes("function translateContentText") &&
-    contentScriptText.includes('__xposter_article_export_menu_in') &&
-    contentScriptText.includes('prefers-reduced-motion: reduce') &&
-    contentScriptText.includes('installArticleExportButton();'),
-  "readable X article pages should expose a localized default-on Markdown copy/download button with remembered mode and restrained feedback motion"
+  includesAll(contentScriptText, [
+    'const ARTICLE_EXPORT_ID = "__xposter_article_export__"',
+    'const ARTICLE_EXPORT_SETTINGS_STORAGE_KEY = "xposter_article_export_settings"',
+    'enabled: settings.enabled !== false',
+    'function installArticleExportButton',
+    'function extractReadableXArticle',
+    'const ARTICLE_EXPORT_LONGFORM_SELECTOR',
+    'function hasReadableArticleSignal',
+    'function containerHasReadableArticleSignal',
+    'function articleExportMediaLinks',
+    'if (!hasReadableArticleSignal()) return null;',
+    'longformRoots',
+    'articleRoots',
+    'if (!containerHasReadableArticleSignal(container)) return null;',
+    'function markdownForArticleNode',
+    'function detectArticleExportTitleNode',
+    'function removeDuplicateArticleTitleParts',
+    'function markdownCharacterCount',
+    'function markdownImageCount',
+    'navigator.clipboard.writeText(text)',
+    'link.download = fileName || articleFileName("")',
+    'root.setAttribute("role", "group")',
+    'root.setAttribute("aria-label", translateContentText("Export Markdown"))',
+    'data-export-action="copy"',
+    'data-export-action="download"',
+    '__xposter_article_export_feedback',
+    'root.addEventListener("click", handleArticleExportActionClick)',
+    'await handleArticleExportAction(button.dataset.exportAction)',
+    'await setArticleExportMode(mode)',
+    'downloadMarkdown(article.markdown, article.fileName)',
+    'notifyArticleExportSuccess(root, "download", article)',
+    'notifyArticleExportSuccess(root, "copy", article)',
+    'root.dataset.articleFileName = article.fileName || articleFileName(article.title)',
+    'root.dataset.articleCharacterCount = String(article.characterCount || 0)',
+    'root.dataset.articleImageCount = String(article.imageCount || 0)',
+    'placeArticleExportRoot(root, article)',
+    'if (anchor.nextSibling !== root) anchor.parentElement.insertBefore(root, anchor.nextSibling)',
+    'anchor.parentElement.insertBefore(root, anchor.nextSibling)',
+    'root.dataset.placement = "inline"',
+    'root.dataset.placement = "fixed"',
+    '个字符，${images} 张图片',
+    '${characters} characters, ${images} images',
+    'position: fixed',
+    'right: var(--__xposter-article-export-inline-end, 24px)',
+    'function articleDockInlineEnd',
+    'width: fit-content',
+    'button[data-active="true"]',
+    '--__xposter-export-paper: #ffffff',
+    'border: 1px solid var(--__xposter-export-line)',
+    'background: var(--__xposter-export-paper)',
+    'const LANGUAGE_STORAGE_KEY = "xposter_language"',
+    'function restoreContentLanguage',
+    'function translateContentText',
+    'prefers-reduced-motion: reduce',
+    'installArticleExportButton();'
+  ]) &&
+    excludesAll(contentScriptText, [
+      '__xposter_article_export_menu',
+      '__xposter_article_export_main',
+      '__xposter_article_export_toggle',
+      'data-export-mode',
+      'documentListenersInstalled',
+      'toggleArticleExportMenu',
+      'closeArticleExportMenuOnOutside',
+      'backdrop-filter: blur',
+      '[data-xposter-article-export-host="true"]'
+    ]),
+  "readable X article pages should expose localized title-adjacent Markdown copy/download labels with remembered mode, title de-duplication, and file/count feedback"
 );
 assert.ok(
   !contentScriptText.includes("function positionDropHint") &&
@@ -423,6 +555,7 @@ assert.equal(
 assert.equal(statusSandbox.statusHelpers.translateContentText("Preparing Markdown..."), "正在准备 Markdown...", "X page status details should follow the selected language");
 assert.equal(statusSandbox.statusHelpers.translateContentText("Writing article"), "正在写入文章", "X page status titles should be localized");
 assert.equal(statusSandbox.statusHelpers.articleExportLabel("copy"), "复制 Markdown", "X article export controls should localize action labels");
+assert.equal(statusSandbox.statusHelpers.articleExportShortLabel("download"), "下载 MD", "X article export title labels should use compact localized text");
 statusSandbox.state.language = "zh-TW";
 assert.equal(statusSandbox.statusHelpers.translateContentText("Preparing Markdown..."), "正在準備 Markdown...", "X page status details should support Traditional Chinese");
 assert.equal(statusSandbox.statusHelpers.translateContentText("Queue Markdown drafts"), "加入 Markdown 草稿佇列", "X page drop hints should support Traditional Chinese");
@@ -505,14 +638,14 @@ assert.ok(
   "article writes should expose a stop control that cancels the page upload loop"
 );
 assert.ok(
-  sidepanelText.includes("const X_ARTICLE_MEDIA_SOFT_LIMIT = 25") &&
+  sidepanelRuntimeText.includes("X_ARTICLE_MEDIA_SOFT_LIMIT: 25") &&
     contentScriptText.includes("const X_ARTICLE_MEDIA_SOFT_LIMIT = 25") &&
     contentScriptText.includes("function preflightArticleMediaLimit") &&
     contentScriptText.includes("function articleMediaUploadEstimate") &&
     contentScriptText.includes('type: "preflight-blocked"') &&
     contentScriptText.includes("mediaLimitWarningText") &&
     contentScriptText.includes("mediaHeadroomText") &&
-    sidepanelText.includes("const X_ARTICLE_MEDIA_HEADROOM_THRESHOLD = 21") &&
+    sidepanelRuntimeText.includes("X_ARTICLE_MEDIA_HEADROOM_THRESHOLD: 21") &&
     sidepanelText.includes("X_ARTICLE_MEDIA_LIMIT_WARNING") &&
     sidepanelText.includes("X_ARTICLE_MEDIA_HEADROOM_NOTE") &&
     sidepanelText.includes("X_ARTICLE_MEDIA_CAPACITY_NOTE") &&
@@ -617,9 +750,11 @@ assert.ok(
 );
 assert.ok(
   sidepanelText.includes("function writeOptionsPayload") &&
-    sidepanelText.includes("...importOptionsPayload()") &&
+    sidepanelText.includes("sourceFileName = \"\"") &&
+    sidepanelText.includes("...normalizeImportOptions({") &&
+    sidepanelText.includes("sourceFileName") &&
     sidepanelText.includes("forceNewArticle: Boolean(forceNewArticle)") &&
-    sidepanelText.includes("options: writeOptionsPayload({ forceNewArticle: batch })") &&
+    sidepanelText.includes("options: writeOptionsPayload({ forceNewArticle: batch, sourceFileName: writeSourceFileName })") &&
     contentScriptText.includes("const forceNewArticle = Boolean(options.forceNewArticle)") &&
     contentScriptText.includes('if (origin !== "paste" && (forceNewArticle || !findEditor()))') &&
     contentScriptText.includes("await ensureEditorReadyForFileImport({ forceNew: forceNewArticle })") &&
@@ -631,7 +766,7 @@ assert.ok(
   sidepanelHtml.includes('id="articleExportOptions"') &&
     sidepanelHtml.includes('id="articleExportOption" checked') &&
     sidepanelHtml.includes("Show Markdown export button") &&
-    sidepanelText.includes('const STORAGE_ARTICLE_EXPORT_SETTINGS = "xposter_article_export_settings"') &&
+    sidepanelRuntimeText.includes('const STORAGE_ARTICLE_EXPORT_SETTINGS = "xposter_article_export_settings"') &&
     sidepanelText.includes("let articleExportOptions = { enabled: true, mode: \"copy\" }") &&
     sidepanelText.includes("function restoreArticleExportOptions") &&
     sidepanelText.includes("function restoreStartupState") &&
@@ -851,6 +986,9 @@ assert.ok(
 assert.ok(
   includesAll(sidepanelHtml, [
     "vendor/minigfm.min.js",
+    "src/sidepanel-config.js",
+    "src/sidepanel-elements.js",
+    "src/sidepanel-editor.js",
     "src/sidepanel-messages.js",
     "src/sidepanel-patterns.js",
     'id="draftEditorToolbar"',
@@ -874,8 +1012,8 @@ assert.ok(
       'data-editor-mode="check"',
       'id="draftBrief"'
     ]) &&
-    includesAll(sidepanelText, [
-      'const DRAFT_EDITOR_MODES = new Set(["edit", "read"])',
+    includesAll(sidepanelRuntimeText, [
+      'DRAFT_EDITOR_MODES: new Set(["edit", "read"])',
       "function draftText()",
       "function miniGfm()",
       "function protectReadPreviewCodeBlocks",
@@ -943,9 +1081,9 @@ assert.ok(
       "function handleTextareaUndoShortcut",
       "function syncProgrammaticUndoFallback",
       "function clearProgrammaticHistoryOnTextInput",
-      "const EDITOR_HISTORY_LIMIT = 40",
+      "EDITOR_HISTORY_LIMIT: 40",
       "function applyTextareaCommand",
-      "return importMarkdownDraft(draftText())",
+      "return importMarkdownDraft(draftText(), { sourceFileName: activeDraftSourceFileName });",
       "els.draftEditorModeToggle?.addEventListener"
     ]) &&
     excludesAll(sidepanelText, [
@@ -1041,6 +1179,9 @@ assert.ok(
     sidepanelCss.includes(".composer.drag-active .draft-drop-target") &&
     sidepanelCss.includes(".composer.drag-active .actions") &&
     sidepanelCss.includes("color-mix(in oklch, var(--signal), var(--paper) 94%)") &&
+    sidepanelCss.includes("xposter-drop-breathe 1.8s ease-in-out infinite") &&
+    sidepanelCss.includes("0 0 0 6px color-mix(in oklch, var(--signal), transparent 92%)") &&
+    sidepanelCss.includes("transform: scale(1.006)") &&
     sidepanelCss.includes(".composer.drag-active .actions {\n  border-color: color-mix(in oklch, var(--signal), var(--line) 52%);\n  background:") &&
     sidepanelCss.includes("xposter-queue-item-enter") &&
     sidepanelCss.includes(".draft-queue-item[data-status=\"writing\"] .draft-queue-index") &&
@@ -1156,7 +1297,7 @@ assert.ok(
   sidepanelText.includes("AudioContext") &&
     sidepanelText.includes("createOscillator") &&
     sidepanelText.includes("SUCCESS_SOUND_STYLES") &&
-    sidepanelText.includes("SUCCESS_SOUND_VOLUME = 1") &&
+    sidepanelRuntimeText.includes("SUCCESS_SOUND_VOLUME: 1") &&
     sidepanelText.includes("successSoundNotes") &&
     sidepanelText.includes("async function primeSuccessAudio()") &&
     sidepanelText.includes("async function previewSuccessFeedback()") &&

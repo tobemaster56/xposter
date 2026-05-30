@@ -125,6 +125,7 @@
       "Add your draft, check the X editor, then import and review the article.": "放入草稿，检查 X 编辑器，然后导入并检查文章。",
       "Put your draft here first. xPoster will guide the X Article check and import after that.": "先把草稿放进来。之后 xPoster 会引导你检查 X 文章并导入。",
       "Add draft": "添加 Markdown",
+      "Add Markdown": "添加 Markdown",
       "Add your Markdown": "放入 Markdown",
       "Add your draft": "放入草稿",
       "Paste Markdown": "粘贴 Markdown",
