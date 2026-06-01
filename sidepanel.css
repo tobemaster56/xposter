@@ -57,9 +57,7 @@
 body {
   margin: 0;
   min-width: 320px;
-  background:
-    linear-gradient(180deg, color-mix(in oklch, var(--paper-2), transparent 18%), transparent 180px),
-    var(--paper);
+  background: var(--paper);
   color: var(--ink);
   font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   letter-spacing: 0;
@@ -78,22 +76,16 @@ html:has(body[data-modal-open="true"]) {
 }
 
 :root[data-theme="dark"] body {
-  background:
-    linear-gradient(180deg, rgba(26, 38, 48, 0.74), transparent 180px),
-    #0f171f;
+  background: #0f171f;
 }
 
 @media (min-width: 720px) {
   body {
-    background:
-      linear-gradient(180deg, color-mix(in oklch, var(--paper-2), transparent 12%), transparent 220px),
-      color-mix(in oklch, var(--paper-2), var(--paper) 68%);
+    background: color-mix(in oklch, var(--paper-2), var(--paper) 68%);
   }
 
   :root[data-theme="dark"] body {
-    background:
-      linear-gradient(180deg, rgba(26, 38, 48, 0.82), transparent 220px),
-      #111923;
+    background: #111923;
   }
 }
 
@@ -516,9 +508,7 @@ h2 {
   pointer-events: auto;
   border: 1px dashed color-mix(in oklch, var(--signal), var(--line) 52%);
   border-radius: 7px;
-  background:
-    linear-gradient(180deg, color-mix(in oklch, var(--signal), var(--paper) 94%), color-mix(in oklch, var(--paper), var(--signal) 4%)),
-    var(--paper);
+  background: color-mix(in oklch, var(--signal), var(--paper) 96%);
   color: var(--signal-text);
   text-align: center;
   box-shadow:
@@ -1044,9 +1034,7 @@ h2 {
 
 .composer.drag-active .actions {
   border-color: color-mix(in oklch, var(--signal), var(--line) 52%);
-  background:
-    linear-gradient(180deg, color-mix(in oklch, var(--signal), var(--paper) 94%), color-mix(in oklch, var(--paper), var(--signal) 4%)),
-    var(--paper);
+  background: color-mix(in oklch, var(--signal), var(--paper) 96%);
   box-shadow:
     inset 0 1px 0 color-mix(in oklch, var(--signal-ink), transparent 82%),
     0 -8px 18px color-mix(in oklch, var(--ink), transparent 91%);
@@ -1152,14 +1140,18 @@ h2 {
 }
 
 .draft-editor-shell {
-  --draft-editor-chrome: color-mix(in oklch, var(--paper-2), var(--paper) 58%);
-  --draft-editor-chrome-line: color-mix(in oklch, var(--line), var(--paper) 18%);
-  --draft-editor-control: color-mix(in oklch, var(--ink), var(--muted) 24%);
-  --draft-editor-control-muted: color-mix(in oklch, var(--muted), var(--ink) 24%);
-  --draft-editor-control-bg: color-mix(in oklch, var(--paper), var(--paper-2) 34%);
-  --draft-editor-control-line: color-mix(in oklch, var(--line), transparent 24%);
-  --draft-editor-control-hover: color-mix(in oklch, var(--signal), var(--paper) 94%);
-  --draft-editor-control-active: color-mix(in oklch, var(--signal), var(--paper) 91%);
+  --draft-editor-chrome: color-mix(in oklch, var(--paper-2), var(--paper) 72%);
+  --draft-editor-chrome-line: color-mix(in oklch, var(--line), transparent 32%);
+  --draft-editor-control: color-mix(in oklch, var(--ink), var(--muted) 42%);
+  --draft-editor-control-muted: color-mix(in oklch, var(--muted), var(--paper) 8%);
+  --draft-editor-control-bg: color-mix(in oklch, var(--paper), var(--paper-2) 18%);
+  --draft-editor-control-line: color-mix(in oklch, var(--line), transparent 18%);
+  --draft-editor-control-hover: color-mix(in oklch, var(--signal), var(--paper) 97%);
+  --draft-editor-control-hover-line: color-mix(in oklch, var(--signal), var(--line) 72%);
+  --draft-editor-control-active: color-mix(in oklch, var(--signal), var(--paper) 94%);
+  --draft-editor-field: color-mix(in oklch, var(--paper), var(--paper-2) 8%);
+  --draft-editor-focus-bg: color-mix(in oklch, var(--signal), var(--paper) 96%);
+  --draft-editor-focus-line: color-mix(in oklch, var(--signal), var(--line) 56%);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   grid-row: 3;
@@ -1167,23 +1159,36 @@ h2 {
   height: 100%;
   min-height: 0;
   max-height: 100%;
-  border: 1px solid color-mix(in oklch, var(--line), var(--ink) 4%);
+  border: 0;
   background: var(--paper);
   overflow: hidden;
   contain: layout;
   transition:
     background-color var(--motion-medium) ease,
-    box-shadow var(--motion-medium) ease,
-    border-color var(--motion-medium) ease;
+    box-shadow var(--motion-medium) ease;
 }
 
 .draft-editor-shell[data-density="compact"] {
   --draft-editor-block-size: var(--draft-editor-compact-block-size);
+  --draft-editor-focus-line: transparent;
+  --draft-editor-focus-bg: color-mix(in oklch, var(--signal), var(--paper) 98%);
+  border: 0;
+  transition:
+    background-color var(--motion-medium) ease,
+    box-shadow var(--motion-medium) ease;
 }
 
 .draft-editor-shell:hover {
-  border-color: color-mix(in oklch, var(--line), var(--ink) 20%);
-  background: color-mix(in oklch, var(--paper), var(--paper-2) 18%);
+  background: color-mix(in oklch, var(--paper), var(--paper-2) 4%);
+}
+
+.draft-editor-shell:focus-within {
+  background: var(--paper);
+}
+
+.draft-editor-shell[data-density="compact"]:hover,
+.draft-editor-shell[data-density="compact"]:focus-within {
+  border-color: transparent;
 }
 
 .draft-editor-shell.draft-ack {
@@ -1200,8 +1205,8 @@ h2 {
   min-width: 0;
   min-height: 36px;
   padding: 4px 6px 4px 8px;
-  border-bottom: 1px solid var(--draft-editor-chrome-line, color-mix(in oklch, var(--line), transparent 36%));
-  background: var(--draft-editor-chrome, color-mix(in oklch, var(--paper-2), var(--paper) 58%));
+  border-bottom: 1px solid var(--draft-editor-chrome-line, color-mix(in oklch, var(--line), var(--paper) 42%));
+  background: var(--draft-editor-chrome, color-mix(in oklch, var(--paper-2), var(--paper) 78%));
 }
 
 .draft-editor-shell:not([data-mode="edit"]) .draft-editor-formatting {
@@ -1233,28 +1238,39 @@ h2 {
   padding: 0 8px;
   border: 1px solid transparent;
   background: transparent;
-  color: var(--draft-editor-control, color-mix(in oklch, var(--ink), var(--muted) 24%));
+  color: var(--draft-editor-control, color-mix(in oklch, var(--ink), var(--muted) 42%));
   cursor: pointer;
   font-size: 11px;
-  font-weight: 820;
+  font-weight: 760;
   line-height: 1;
   white-space: nowrap;
   transition:
     background-color var(--motion-quick) ease,
     border-color var(--motion-quick) ease,
+    color var(--motion-quick) ease,
     transform var(--motion-quick) var(--ease-out-quart);
 }
 
 .record-edit-toolbar button {
-  border-color: color-mix(in oklch, var(--line), transparent 18%);
-  background: color-mix(in oklch, var(--paper), var(--paper-2) 28%);
+  border-color: var(--draft-editor-control-line, color-mix(in oklch, var(--line), var(--paper) 30%));
+  background: var(--draft-editor-control-bg, color-mix(in oklch, var(--paper), var(--paper-2) 18%));
 }
 
 .draft-editor-formatting button:hover,
 .record-edit-toolbar button:hover {
-  border-color: color-mix(in oklch, var(--signal), var(--line) 44%);
-  background: var(--draft-editor-control-hover, color-mix(in oklch, var(--signal), var(--paper) 94%));
-  color: var(--signal-text);
+  border-color: var(--draft-editor-control-hover-line, color-mix(in oklch, var(--signal), var(--line) 72%));
+  background: var(--draft-editor-control-hover, color-mix(in oklch, var(--signal), var(--paper) 97%));
+  color: color-mix(in oklch, var(--signal-text), var(--ink) 18%);
+}
+
+.draft-editor-formatting button:focus-visible,
+.record-edit-toolbar button:focus-visible,
+.draft-editor-mode-toggle:focus-visible {
+  outline: 0;
+  border-color: var(--draft-editor-focus-line, color-mix(in oklch, var(--signal), var(--line) 68%));
+  background: var(--draft-editor-control-hover, color-mix(in oklch, var(--signal), var(--paper) 97%));
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--signal), transparent 72%);
+  color: color-mix(in oklch, var(--signal-text), var(--ink) 18%);
 }
 
 .draft-editor-formatting button:active,
@@ -1264,9 +1280,9 @@ h2 {
 
 .draft-editor-formatting button[aria-pressed="true"],
 .record-edit-toolbar button[aria-pressed="true"] {
-  border-color: var(--ink);
-  background: var(--ink);
-  color: var(--button-ink);
+  border-color: color-mix(in oklch, var(--signal), var(--line) 54%);
+  background: var(--draft-editor-control-active, color-mix(in oklch, var(--signal), var(--paper) 94%));
+  color: color-mix(in oklch, var(--signal-text), var(--ink) 12%);
 }
 
 .draft-editor-formatting button[data-editor-command="italic"] span,
@@ -1311,7 +1327,8 @@ h2 {
   height: 100%;
   max-height: 100%;
   overflow: hidden;
-  background: transparent;
+  background: var(--draft-editor-field, color-mix(in oklch, var(--paper), var(--paper-2) 8%));
+  transition: background-color var(--motion-medium) ease;
 }
 
 #markdown,
@@ -1359,11 +1376,13 @@ h2 {
     box-shadow var(--motion-medium) ease;
 }
 
+#markdown:focus {
+  outline: 0;
+  caret-color: var(--signal-text);
+}
+
 .draft-editor-input-wrap:focus-within {
-  background: color-mix(in oklch, var(--signal), var(--paper) 96%);
-  box-shadow:
-    inset 0 0 0 1px color-mix(in oklch, var(--signal), transparent 42%),
-    inset 0 1px 0 color-mix(in oklch, var(--signal-ink), transparent 70%);
+  background: var(--draft-editor-focus-bg, color-mix(in oklch, var(--signal), var(--paper) 98%));
 }
 
 #markdown::selection {
@@ -1621,11 +1640,11 @@ h2 {
   align-items: center;
   gap: 8px;
   padding: 4px 6px 4px 8px;
-  border-top: 1px solid var(--draft-editor-chrome-line, color-mix(in oklch, var(--line), transparent 36%));
-  background: var(--draft-editor-chrome, color-mix(in oklch, var(--paper-2), var(--paper) 58%));
-  color: var(--draft-editor-control-muted, color-mix(in oklch, var(--muted), var(--ink) 24%));
+  border-top: 1px solid var(--draft-editor-chrome-line, color-mix(in oklch, var(--line), var(--paper) 42%));
+  background: var(--paper);
+  color: var(--draft-editor-control-muted, color-mix(in oklch, var(--muted), var(--paper) 8%));
   font-size: 11px;
-  font-weight: 720;
+  font-weight: 680;
 }
 
 .draft-editor-status > span {
@@ -1645,12 +1664,12 @@ h2 {
   align-items: center;
   gap: 4px;
   padding: 0 7px;
-  border: 1px solid var(--draft-editor-control-line, color-mix(in oklch, var(--line), transparent 24%));
-  background: var(--draft-editor-control-bg, color-mix(in oklch, var(--paper), var(--paper-2) 34%));
-  color: var(--draft-editor-control-muted, color-mix(in oklch, var(--muted), var(--ink) 24%));
+  border: 1px solid var(--draft-editor-control-line, color-mix(in oklch, var(--line), var(--paper) 30%));
+  background: var(--draft-editor-control-bg, color-mix(in oklch, var(--paper), var(--paper-2) 18%));
+  color: var(--draft-editor-control-muted, color-mix(in oklch, var(--muted), var(--paper) 8%));
   cursor: pointer;
   font-size: 10.5px;
-  font-weight: 820;
+  font-weight: 760;
   line-height: 1;
   white-space: nowrap;
   transition:
@@ -1661,16 +1680,16 @@ h2 {
 }
 
 .draft-editor-mode-toggle:hover {
-  border-color: color-mix(in oklch, var(--signal), var(--line) 40%);
-  background: var(--draft-editor-control-hover, color-mix(in oklch, var(--signal), var(--paper) 94%));
-  color: var(--signal-text);
+  border-color: var(--draft-editor-control-hover-line, color-mix(in oklch, var(--signal), var(--line) 72%));
+  background: var(--draft-editor-control-hover, color-mix(in oklch, var(--signal), var(--paper) 97%));
+  color: color-mix(in oklch, var(--signal-text), var(--ink) 18%);
 }
 
 .draft-editor-mode-toggle[aria-pressed="true"],
 .draft-editor-shell[data-mode="read"] .draft-editor-mode-toggle {
-  border-color: color-mix(in oklch, var(--signal), var(--line) 38%);
-  background: var(--draft-editor-control-active, color-mix(in oklch, var(--signal), var(--paper) 91%));
-  color: var(--signal-text);
+  border-color: color-mix(in oklch, var(--signal), var(--line) 54%);
+  background: var(--draft-editor-control-active, color-mix(in oklch, var(--signal), var(--paper) 94%));
+  color: color-mix(in oklch, var(--signal-text), var(--ink) 12%);
 }
 
 .draft-editor-mode-toggle:active {
@@ -1708,18 +1727,29 @@ h2 {
 }
 
 :root[data-theme="dark"] .draft-editor-shell {
+  --draft-editor-chrome: color-mix(in oklch, var(--paper-2), var(--paper) 56%);
+  --draft-editor-chrome-line: color-mix(in oklch, var(--line), transparent 28%);
+  --draft-editor-control: color-mix(in oklch, var(--ink), var(--muted) 32%);
+  --draft-editor-control-muted: color-mix(in oklch, var(--muted), var(--paper) 6%);
+  --draft-editor-control-bg: color-mix(in oklch, var(--paper), var(--paper-2) 22%);
+  --draft-editor-control-line: color-mix(in oklch, var(--line), transparent 20%);
+  --draft-editor-control-hover: color-mix(in oklch, var(--signal), var(--paper) 91%);
+  --draft-editor-control-hover-line: color-mix(in oklch, var(--signal), var(--line) 62%);
+  --draft-editor-control-active: color-mix(in oklch, var(--signal), var(--paper) 86%);
+  --draft-editor-field: color-mix(in oklch, var(--paper), var(--paper-2) 10%);
+  --draft-editor-focus-bg: color-mix(in oklch, var(--signal), var(--paper) 94%);
+  --draft-editor-focus-line: color-mix(in oklch, var(--signal), var(--line) 54%);
   background: var(--paper);
 }
 
 :root[data-theme="dark"] .draft-editor-toolbar,
-:root[data-theme="dark"] .record-edit-toolbar,
-:root[data-theme="dark"] .draft-editor-status {
-  background: color-mix(in oklch, var(--paper-2), var(--paper) 38%);
+:root[data-theme="dark"] .record-edit-toolbar {
+  background: var(--draft-editor-chrome, color-mix(in oklch, var(--paper-2), var(--paper) 56%));
 }
 
 :root[data-theme="dark"] .draft-editor-formatting button,
 :root[data-theme="dark"] .record-edit-toolbar button {
-  background: color-mix(in oklch, var(--paper), var(--paper-2) 28%);
+  background: var(--draft-editor-control-bg, color-mix(in oklch, var(--paper), var(--paper-2) 22%));
 }
 
 :root[data-theme="dark"] .draft-editor-formatting button {
@@ -1727,14 +1757,14 @@ h2 {
 }
 
 :root[data-theme="dark"] .draft-editor-mode-toggle {
-  background: color-mix(in oklch, var(--paper), var(--paper-2) 22%);
-  color: color-mix(in oklch, var(--muted), var(--ink) 24%);
+  background: var(--draft-editor-control-bg, color-mix(in oklch, var(--paper), var(--paper-2) 22%));
+  color: var(--draft-editor-control-muted, color-mix(in oklch, var(--muted), var(--paper) 6%));
 }
 
 :root[data-theme="dark"] .draft-editor-mode-toggle[aria-pressed="true"],
 :root[data-theme="dark"] .draft-editor-shell[data-mode="read"] .draft-editor-mode-toggle {
-  background: color-mix(in oklch, var(--signal), var(--paper) 84%);
-  color: var(--signal-text);
+  background: var(--draft-editor-control-active, color-mix(in oklch, var(--signal), var(--paper) 86%));
+  color: color-mix(in oklch, var(--signal-text), var(--ink) 10%);
 }
 
 :root[data-theme="dark"] .draft-inline-preview[data-preview-mode="read"] code {
@@ -2286,9 +2316,7 @@ textarea:focus-visible,
   gap: 11px;
   padding: 13px;
   border: 1px solid var(--line);
-  background:
-    linear-gradient(180deg, color-mix(in oklch, var(--paper-2), transparent 68%), transparent 42%),
-    var(--paper);
+  background: color-mix(in oklch, var(--paper), var(--paper-2) 12%);
 }
 
 .import-ledger {
@@ -2765,9 +2793,7 @@ textarea:focus-visible,
   align-items: center;
   padding: 8px 9px;
   border: 1px solid color-mix(in oklch, var(--line), transparent 14%);
-  background:
-    linear-gradient(90deg, color-mix(in oklch, var(--signal), transparent 92%), transparent 64%),
-    color-mix(in oklch, var(--paper), var(--paper-2) 22%);
+  background: color-mix(in oklch, var(--paper), var(--paper-2) 22%);
 }
 
 .inline-write-status[hidden] {
@@ -2800,11 +2826,8 @@ textarea:focus-visible,
 }
 
 .inline-write-status[data-tone="work"] {
-  background:
-    linear-gradient(110deg, transparent 0 24%, color-mix(in oklch, var(--signal), transparent 84%) 42%, transparent 62%),
-    color-mix(in oklch, var(--signal), var(--paper) 93%);
-  background-size: 190% 100%, auto;
-  animation: xposter-inline-status-sweep 2.8s linear infinite;
+  border-color: color-mix(in oklch, var(--signal), var(--line) 42%);
+  background: color-mix(in oklch, var(--signal), var(--paper) 94%);
 }
 
 .inline-write-status[data-tone="done"],
@@ -2914,23 +2937,13 @@ textarea:focus-visible,
 .progress-meter span {
   position: relative;
   display: block;
-  width: 0;
+  width: 100%;
   height: 100%;
   overflow: hidden;
   background: var(--signal);
-  transition: width 180ms ease-out, background-color 180ms ease-out;
-}
-
-.progress-meter span::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.58), transparent);
-  transform: translateX(-110%);
-}
-
-.inline-write-status[data-tone="work"] .progress-meter span::after {
-  animation: xposter-meter-glide 1.8s linear infinite;
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+  transition: transform 180ms ease-out, background-color 180ms ease-out;
 }
 
 .inline-write-status[data-tone="warn"] .progress-meter span {
@@ -2939,24 +2952,6 @@ textarea:focus-visible,
 
 .inline-write-status[data-tone="error"] .progress-meter span {
   background: var(--danger);
-}
-
-@keyframes xposter-meter-glide {
-  from {
-    transform: translateX(-110%);
-  }
-  to {
-    transform: translateX(110%);
-  }
-}
-
-@keyframes xposter-inline-status-sweep {
-  from {
-    background-position: 160% 0, 0 0;
-  }
-  to {
-    background-position: -60% 0, 0 0;
-  }
 }
 
 @keyframes xposter-subtle-note-in {
@@ -3152,8 +3147,7 @@ textarea:focus-visible,
   .ledger-list li[data-ledger-kind="media-limit"],
   .actions:not([data-empty="true"]) .primary[data-reveal="write-ready"],
   .actions:not([data-empty="true"]) .primary[data-reveal="write-ready"] svg,
-  .inline-write-status[data-tone="work"],
-  .inline-write-status[data-tone="work"] .progress-meter span::after {
+  .inline-write-status[data-tone="work"] {
     animation: none;
   }
 }
@@ -3390,10 +3384,8 @@ textarea:focus-visible,
   align-items: end;
   gap: 6px;
   padding: 9px 12px 11px;
-  border: 1px solid color-mix(in oklch, var(--signal), var(--line) 45%);
-  background:
-    linear-gradient(180deg, color-mix(in oklch, var(--signal), var(--paper) 96%), transparent 72px),
-    var(--paper);
+  border: 1px solid color-mix(in oklch, var(--line), var(--paper) 18%);
+  background: var(--paper);
   transition:
     background-color var(--motion-medium) ease,
     border-color var(--motion-medium) ease,
@@ -3413,7 +3405,7 @@ textarea:focus-visible,
 
 .actions[data-empty="true"] {
   display: grid;
-  border-color: color-mix(in oklch, var(--line), var(--signal) 12%);
+  border-color: color-mix(in oklch, var(--line), var(--paper) 18%);
   background: var(--paper);
 }
 
@@ -3771,6 +3763,10 @@ textarea:focus-visible,
   align-items: center;
   justify-content: flex-end;
   min-height: 24px;
+}
+
+.record-clear-wrap[hidden] {
+  display: none;
 }
 
 .record-clear-confirm {
@@ -4157,9 +4153,56 @@ textarea:focus-visible,
   fill: currentColor;
 }
 
+.record-delete-action svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.record-delete-action {
+  color: color-mix(in oklch, var(--danger), var(--muted) 42%);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(3px) scale(.94);
+  transform-origin: 50% 50%;
+  visibility: hidden;
+  transition:
+    background-color var(--motion-quick) ease,
+    color var(--motion-quick) ease,
+    opacity var(--motion-medium) ease,
+    transform var(--motion-medium) var(--ease-out-quint),
+    visibility 0s linear var(--motion-medium);
+}
+
+.record-history-item:hover .record-delete-action {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0) scale(1);
+  visibility: visible;
+  transition-delay: 0s, 0s, 620ms, 620ms, 620ms;
+}
+
+.record-history-item:focus-visible .record-delete-action,
+.record-history-item:focus-within .record-delete-action,
+.record-delete-action:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0) scale(1);
+  visibility: visible;
+  transition-delay: 0s;
+}
+
 .record-icon-action:hover {
   background: color-mix(in oklch, var(--ink), var(--paper) 92%);
   color: var(--ink);
+}
+
+.record-delete-action:hover,
+.record-delete-action:focus-visible {
+  background: color-mix(in oklch, var(--danger), var(--paper) 93%);
+  color: var(--danger);
 }
 
 .record-icon-action:focus-visible {
@@ -4167,6 +4210,12 @@ textarea:focus-visible,
   outline-offset: 1px;
   background: color-mix(in oklch, var(--paper-2), var(--paper) 62%);
   color: var(--ink);
+}
+
+.record-delete-action:focus-visible {
+  outline-color: color-mix(in oklch, var(--danger), transparent 40%);
+  background: color-mix(in oklch, var(--danger), var(--paper) 93%);
+  color: var(--danger);
 }
 
 :root[data-theme="dark"] .primary:hover {
@@ -4177,6 +4226,12 @@ textarea:focus-visible,
 :root[data-theme="dark"] .icon-button,
 :root[data-theme="dark"] .record-icon-action {
   color: color-mix(in oklch, var(--ink), var(--muted) 16%);
+}
+
+:root[data-theme="dark"] .record-delete-action,
+:root[data-theme="dark"] .record-delete-action:hover,
+:root[data-theme="dark"] .record-delete-action:focus-visible {
+  color: var(--danger);
 }
 
 .record-icon-action:active {
@@ -4339,10 +4394,10 @@ textarea:focus-visible,
 }
 
 .record-edit-input-wrap:focus-within {
-  background: color-mix(in oklch, var(--signal), var(--paper) 96%);
+  background: var(--draft-editor-focus-bg, color-mix(in oklch, var(--signal), var(--paper) 98%));
   box-shadow:
-    inset 0 0 0 1px color-mix(in oklch, var(--signal), transparent 42%),
-    inset 0 1px 0 color-mix(in oklch, var(--signal-ink), transparent 70%);
+    inset 0 0 0 1px var(--draft-editor-focus-line, color-mix(in oklch, var(--signal), var(--line) 68%)),
+    inset 0 1px 0 color-mix(in oklch, var(--signal-ink), transparent 84%);
 }
 
 .record-edit-actions {
@@ -5146,9 +5201,7 @@ textarea:focus-visible,
   margin-top: 2px;
   padding: 11px;
   border: 1px solid color-mix(in oklch, var(--line), transparent 12%);
-  background:
-    linear-gradient(180deg, color-mix(in oklch, var(--paper), var(--paper-2) 14%), transparent),
-    color-mix(in oklch, var(--paper-2), var(--paper) 62%);
+  background: color-mix(in oklch, var(--paper-2), var(--paper) 62%);
 }
 
 .setting-subcontrols label {

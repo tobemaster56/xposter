@@ -54,6 +54,37 @@
     typeof chrome !== "undefined" && chrome.runtime?.getManifest
       ? chrome.runtime.getManifest().version
       : "dev";
+  const workspaceTabs = [...document.querySelectorAll(".tab")];
+  const workspacePanels = [...document.querySelectorAll(".panel")];
+  const workspaceTopbar = document.querySelector(".topbar");
+  const workspaceTabsContainer = document.querySelector(".tabs");
+  const themeModeInputs = els.themeChoice ? [...els.themeChoice.querySelectorAll('input[name="themeMode"]')] : [];
+  const draftEditorCommandButtons = collectEditorCommandButtons(els.draftEditorToolbar);
+  const recordEditCommandButtons = collectEditorCommandButtons(els.recordEditToolbar);
+  const conversionMapItems = indexElementsByData(els.conversionMapList, "data-map");
+  const preflightItems = indexElementsByData(els.preflightList, "data-check");
+  const preflightActionButtons = indexChildElementByData(preflightItems, "button[data-preflight-action]");
+  const timelineItems = indexElementsByData(els.timelineList, "data-timeline-step");
+  const liveRunbookItems = indexElementsByData(els.liveRunbookList, "data-runbook-step");
+  const liveRunbookActionButtons = indexChildElementByData(liveRunbookItems, "button[data-runbook-action]");
+  const proofDeckItems = indexElementsByData(els.proofDeckList, "data-proof");
+  const completionAuditItems = indexElementsByData(els.completionAuditList, "data-audit");
+  const liveResultInputItems = collectLiveResultInputItems();
+  const importDraftNodes = collectImportDraftNodes();
+  const draftDropStatusNodes = collectDraftDropStatusNodes();
+  const planBreakdownDetail = els.planBreakdown?.querySelector("p") || null;
+  const pageStateLabel = els.pageState?.querySelector("span") || els.pageState || null;
+  const conversionMapSection = els.conversionMapList?.closest("section") || null;
+  const importLedgerSection = els.importLedgerList?.closest("section") || null;
+  const reviewSection = els.reviewList?.closest("section") || null;
+  const issueQueueSection = els.issueQueueList?.closest("section") || null;
+  const timelineSection = els.timelineList?.closest("section") || null;
+  const liveRunbookSection = els.liveRunbookList?.closest("section") || null;
+  const proofDeckSection = els.proofDeckList?.closest("section") || null;
+  const completionAuditSection = els.completionAuditList?.closest("section") || null;
+  const recordClearWrap = els.clearRecordHistory?.closest(".record-clear-wrap") || null;
+  const rowQueryCache = new WeakMap();
+  const recordSearchTextCache = new WeakMap();
 
   let latestParsed = null;
   let latestCounts = shared.segmentCounts([]);
@@ -109,6 +140,7 @@
   let draftDropStatusTimer = null;
   let remoteImageAccessStatus = { origins: [], available: [], missing: [], checkedAt: null };
   let remoteImageProbeStatus = { state: "idle", total: 0, ok: 0, fail: 0, results: [], checkedAt: null };
+  let languageOptionButtons = [];
 
   const sidepanelMessages = window.xPosterSidepanelMessages?.register?.(i18n, shared, {
     X_ARTICLE_MEDIA_LIMIT_WARNING,
@@ -164,10 +196,66 @@
   }
 
   function syncThemeChoice() {
-    if (!els.themeChoice) return;
-    els.themeChoice.querySelectorAll('input[name="themeMode"]').forEach((input) => {
-      input.checked = input.value === currentThemeMode;
+    themeModeInputs.forEach((input) => {
+      setBooleanPropertyIfChanged(input, "checked", input.value === currentThemeMode);
     });
+  }
+
+  function indexElementsByData(root, attribute) {
+    const items = new Map();
+    if (!root || !attribute) return items;
+    root.querySelectorAll(`[${attribute}]`).forEach((item) => {
+      const value = item.getAttribute(attribute);
+      if (value) items.set(value, item);
+    });
+    return items;
+  }
+
+  function indexChildElementByData(items, selector) {
+    const children = new Map();
+    if (!items || !selector) return children;
+    for (const [key, item] of items) {
+      const child = item.querySelector(selector);
+      if (child) children.set(key, child);
+    }
+    return children;
+  }
+
+  function collectEditorCommandButtons(toolbar) {
+    return toolbar ? Array.from(toolbar.querySelectorAll("[data-editor-command]")) : [];
+  }
+
+  function collectLanguageOptionButtons() {
+    return els.languageOptionsList ? Array.from(els.languageOptionsList.querySelectorAll("[data-language-option]")) : [];
+  }
+
+  function collectLiveResultInputItems() {
+    if (!els.liveResultList) return [];
+    return Array.from(els.liveResultList.querySelectorAll("input[data-live-check]")).map((input) => {
+      const item = input.closest("li");
+      return {
+        input,
+        item,
+        label: item?.querySelector("label") || null,
+        detail: item?.querySelector("span") || null
+      };
+    });
+  }
+
+  function collectImportDraftNodes() {
+    const button = els.importDraft;
+    if (!button) return { label: null, iconMarkup: IMPORT_ICON_SVG };
+    return {
+      label: button.querySelector("span"),
+      iconMarkup: button.querySelector("svg")?.outerHTML || IMPORT_ICON_SVG
+    };
+  }
+
+  function collectDraftDropStatusNodes() {
+    return {
+      title: els.draftDropStatus?.querySelector("strong") || null,
+      detail: els.draftDropStatus?.querySelector("span") || null
+    };
   }
 
   function startupStorage() {
@@ -214,7 +302,22 @@
 
   function queueItemSourceFileName(id) {
     if (!id) return "";
-    return normalizeSourceFileName(draftQueue.find((item) => item.id === id)?.fileName);
+    return normalizeSourceFileName(queueItemById(id)?.fileName);
+  }
+
+  function queueItemById(id) {
+    return id ? draftQueue.find((item) => item.id === id) || null : null;
+  }
+
+  function activeQueueItem() {
+    return queueItemById(activeQueueItemId);
+  }
+
+  function clearMissingActiveQueueItem() {
+    if (!activeQueueItemId) return null;
+    const item = activeQueueItem();
+    if (!item) activeQueueItemId = null;
+    return item;
   }
 
   function activeWriteSourceFileName(fallback = "") {
@@ -397,25 +500,67 @@
     const isRead = mode === "read";
     const nextMode = isRead ? "edit" : "read";
     const nextLabel = nextMode === "read" ? "Preview" : "Edit";
-    button.dataset.nextMode = nextMode;
-    button.setAttribute("aria-pressed", isRead ? "true" : "false");
-    button.setAttribute("aria-label", localizeText(nextLabel));
-    button.title = localizeText(nextLabel);
+    setDatasetValueIfChanged(button, "nextMode", nextMode);
+    setAttributeValueIfChanged(button, "aria-pressed", isRead ? "true" : "false");
+    setAttributeValueIfChanged(button, "aria-label", localizeText(nextLabel));
+    setAttributeValueIfChanged(button, "title", localizeText(nextLabel));
   }
 
   function updateDraftEditorStatus() {
     if (!els.draftEditorStats) return;
     const text = draftText();
-    setLocalizedText(els.draftEditorStats, editorStatsText(text, markdownSegmentCounts(text)));
+    setLocalizedTextIfChanged(els.draftEditorStats, editorStatsText(text, markdownSegmentCounts(text)));
+  }
+
+  function countMeaningfulMarkdownLines(text) {
+    let count = 0;
+    let hasContent = false;
+    const value = String(text || "");
+    for (let index = 0; index < value.length; index += 1) {
+      const char = value[index];
+      if (char === "\n" || char === "\r") {
+        if (hasContent) count += 1;
+        hasContent = false;
+        if (char === "\r" && value[index + 1] === "\n") index += 1;
+      } else if (!/\s/.test(char)) {
+        hasContent = true;
+      }
+    }
+    return hasContent ? count + 1 : count;
+  }
+
+  function countItemsByTone(items, tone) {
+    if (!Array.isArray(items)) return 0;
+    let count = 0;
+    for (const item of items) {
+      if (item?.tone === tone) count += 1;
+    }
+    return count;
+  }
+
+  function indexPreflightChecks(checks) {
+    return new Map((checks || []).map((check) => [check.id, check]));
+  }
+
+  function preflightEvidenceContext(checks, context = {}) {
+    const { includePreviewPlan = true, ...baseContext } = context;
+    const evidenceContext = {
+      ...baseContext,
+      byId: baseContext.byId || indexPreflightChecks(checks),
+      liveResult: baseContext.liveResult || buildLiveResultEvidence(),
+      needsRemote: typeof baseContext.needsRemote === "boolean" ? baseContext.needsRemote : remoteHttpImageSegments(latestParsed).length > 0
+    };
+    if (includePreviewPlan) evidenceContext.previewPlan = baseContext.previewPlan || buildPreviewPlan();
+    return evidenceContext;
   }
 
   function updateDraftEditorDensity(text = draftText()) {
     if (!els.draftEditorShell) return;
     const value = String(text || "");
-    const meaningfulLines = value.split(/\r\n?|\n/).filter((line) => line.trim()).length;
+    const meaningfulLines = countMeaningfulMarkdownLines(value);
     const hasRichBlocks = /(^|\n)\s*(```|!\[|#{1,6}\s|\|.+\||[-*+]\s+|\d+\.\s+)/.test(value);
     const isCompact = !value.trim() || (value.length < 420 && meaningfulLines <= 8 && !hasRichBlocks);
-    els.draftEditorShell.dataset.density = isCompact ? "compact" : "roomy";
+    setDatasetValueIfChanged(els.draftEditorShell, "density", isCompact ? "compact" : "roomy");
   }
 
   function draftSyntaxSpan(className, text) {
@@ -502,7 +647,7 @@
     if (!target) return;
     const value = String(text || "");
     if (value.length > SYNTAX_HIGHLIGHT_DETAIL_LIMIT) {
-      target.textContent = value;
+      setTextContentIfChanged(target, value);
       return;
     }
     const lines = value.replace(/\r\n?/g, "\n").split("\n");
@@ -515,7 +660,7 @@
         return rendered || " ";
       })
       .join("\n");
-    target.innerHTML = html;
+    setSourceHtmlIfChanged(target, html);
   }
 
   function cancelDeferredDraftSyntaxHighlight() {
@@ -536,7 +681,7 @@
     if (!els.draftSyntaxHighlight) return;
     cancelDeferredDraftSyntaxHighlight();
     const value = String(text || "");
-    els.draftSyntaxHighlight.textContent = value;
+    setTextContentIfChanged(els.draftSyntaxHighlight, value);
     draftSyntaxIdleHandle = runWhenIdle(() => {
       draftSyntaxIdleHandle = null;
       if (draftText() !== value || draftEditorMode !== "edit" || queueModeActive()) return;
@@ -545,14 +690,12 @@
   }
 
   function syncDraftSyntaxScroll() {
-    if (!els.markdown || !els.draftSyntaxHighlight) return;
-    els.draftSyntaxHighlight.scrollTop = els.markdown.scrollTop;
-    els.draftSyntaxHighlight.scrollLeft = els.markdown.scrollLeft;
+    syncScrollPositionIfChanged(els.draftSyntaxHighlight, els.markdown);
   }
 
   function setDraftText(markdown, { preview = true, syntax = "now" } = {}) {
     const text = String(markdown || "");
-    if (els.markdown && els.markdown.value !== text) els.markdown.value = text;
+    setPropertyValueIfChanged(els.markdown, "value", text);
     resetEditorHistory(els.markdown);
     if (syntax === "defer") scheduleDraftSyntaxHighlight(text);
     else if (syntax === "none") cancelDeferredDraftSyntaxHighlight();
@@ -602,22 +745,17 @@
     draftEditorMode = DRAFT_EDITOR_MODES.has(mode) ? mode : "edit";
     const isEdit = draftEditorMode === "edit";
     const isPreview = !isEdit;
-    if (els.draftEditorShell) els.draftEditorShell.dataset.mode = draftEditorMode;
-    if (els.draftEditorInputWrap) {
-      els.draftEditorInputWrap.hidden = isPreview || queueModeActive();
-      els.draftEditorInputWrap.setAttribute("aria-hidden", isPreview || queueModeActive() ? "true" : "false");
-    }
+    const hasQueue = queueModeActive();
+    setDatasetValueIfChanged(els.draftEditorShell, "mode", draftEditorMode);
+    syncVisibilityState(els.draftEditorInputWrap, isPreview || hasQueue);
     if (els.markdown) {
-      els.markdown.setAttribute("aria-hidden", isPreview || queueModeActive() ? "true" : "false");
-      els.markdown.tabIndex = isPreview || queueModeActive() ? -1 : 0;
+      setAttributeValueIfChanged(els.markdown, "aria-hidden", isPreview || hasQueue ? "true" : "false");
+      setNumericPropertyIfChanged(els.markdown, "tabIndex", isPreview || hasQueue ? -1 : 0);
     }
-    if (els.draftInlinePreview) {
-      els.draftInlinePreview.hidden = !isPreview || queueModeActive();
-      els.draftInlinePreview.setAttribute("aria-hidden", isPreview && !queueModeActive() ? "false" : "true");
-    }
+    syncVisibilityState(els.draftInlinePreview, !isPreview || hasQueue);
     updateDraftEditorModeToggle();
-    els.draftEditorToolbar?.querySelectorAll("[data-editor-command]").forEach((button) => {
-      button.disabled = !isEdit || queueModeActive();
+    draftEditorCommandButtons.forEach((button) => {
+      setBooleanPropertyIfChanged(button, "disabled", !isEdit || hasQueue);
     });
     updateDraftEditorStatus();
     if (isEdit) renderDraftSyntaxHighlight();
@@ -630,26 +768,24 @@
 
   function updateInlinePreview(parsed = latestParsed, counts = latestCounts) {
     if (!els.draftInlinePreview) return;
-    if (els.draftInlinePreview) els.draftInlinePreview.dataset.previewMode = "read";
+    setDatasetValueIfChanged(els.draftInlinePreview, "previewMode", "read");
     const text = draftText();
     if (!text.trim()) {
-      if (els.draftInlinePreviewTitle) setLocalizedText(els.draftInlinePreviewTitle, "Reading preview");
-      if (els.draftInlinePreviewMeta) setLocalizedText(els.draftInlinePreviewMeta, "Paste Markdown to read it here.");
-      if (els.draftInlinePreviewBody) {
-        els.draftInlinePreviewBody.innerHTML = emptyMarkdownPreviewHtml();
+      setLocalizedTextIfChanged(els.draftInlinePreviewTitle, "Reading preview");
+      setLocalizedTextIfChanged(els.draftInlinePreviewMeta, "Paste Markdown to read it here.");
+      if (setSourceHtmlIfChanged(els.draftInlinePreviewBody, emptyMarkdownPreviewHtml())) {
+        translateDynamicDom(els.draftInlinePreview);
       }
-      translateDynamicDom(els.draftInlinePreview);
       return;
     }
-    if (els.draftInlinePreviewTitle) setLocalizedText(els.draftInlinePreviewTitle, "Reading preview");
-    if (els.draftInlinePreviewMeta) setLocalizedText(els.draftInlinePreviewMeta, [
+    setLocalizedTextIfChanged(els.draftInlinePreviewTitle, "Reading preview");
+    setLocalizedTextIfChanged(els.draftInlinePreviewMeta, [
       formatCompactUnit(text.length, "char", "chars", "字符"),
       formatCompactUnit((text.match(/^!\[/gm) || []).length, "image", "images", "图")
     ].join(" · "));
-    if (els.draftInlinePreviewBody) {
-      els.draftInlinePreviewBody.innerHTML = markdownPreviewHtml(text);
+    if (setSourceHtmlIfChanged(els.draftInlinePreviewBody, markdownPreviewHtml(text))) {
+      translateDynamicDom(els.draftInlinePreview);
     }
-    translateDynamicDom(els.draftInlinePreview);
   }
 
   function markdownPreviewHtml(markdown = "") {
@@ -686,8 +822,8 @@
   }
 
   function syncImportOptionsControls() {
-    if (els.importTitleOption) els.importTitleOption.checked = importOptions.setTitle !== false;
-    if (els.importCoverOption) els.importCoverOption.checked = importOptions.setCover !== false;
+    setBooleanPropertyIfChanged(els.importTitleOption, "checked", importOptions.setTitle !== false);
+    setBooleanPropertyIfChanged(els.importCoverOption, "checked", importOptions.setCover !== false);
   }
 
   function applyImportOptions(options = importOptions, { refresh = true } = {}) {
@@ -726,7 +862,7 @@
   }
 
   function syncArticleExportControls() {
-    if (els.articleExportOption) els.articleExportOption.checked = articleExportOptions.enabled !== false;
+    setBooleanPropertyIfChanged(els.articleExportOption, "checked", articleExportOptions.enabled !== false);
   }
 
   function applyArticleExportOptions(options = articleExportOptions) {
@@ -763,11 +899,11 @@
   }
 
   function syncSuccessFeedbackControls() {
-    if (els.confettiOption) els.confettiOption.checked = successFeedbackOptions.confetti !== false;
-    if (els.successSoundOption) els.successSoundOption.checked = successFeedbackOptions.sound !== false;
-    if (els.successSoundStyle) els.successSoundStyle.value = successFeedbackOptions.soundStyle || "soft";
+    setBooleanPropertyIfChanged(els.confettiOption, "checked", successFeedbackOptions.confetti !== false);
+    setBooleanPropertyIfChanged(els.successSoundOption, "checked", successFeedbackOptions.sound !== false);
+    setPropertyValueIfChanged(els.successSoundStyle, "value", successFeedbackOptions.soundStyle || "soft");
     const soundEnabled = successFeedbackOptions.sound !== false;
-    if (els.successSoundStyle) els.successSoundStyle.disabled = !soundEnabled;
+    setBooleanPropertyIfChanged(els.successSoundStyle, "disabled", !soundEnabled);
   }
 
   function applySuccessFeedbackOptions(options = successFeedbackOptions) {
@@ -879,11 +1015,11 @@
   function applyTheme(mode = currentThemeMode) {
     currentThemeMode = normalizeThemeMode(mode);
     const resolvedTheme = resolveTheme(currentThemeMode);
-    document.documentElement.dataset.theme = resolvedTheme;
-    document.documentElement.dataset.themeMode = currentThemeMode;
-    document.documentElement.style.colorScheme = resolvedTheme;
-    document.body.dataset.theme = resolvedTheme;
-    document.body.dataset.themeMode = currentThemeMode;
+    setDatasetValueIfChanged(document.documentElement, "theme", resolvedTheme);
+    setDatasetValueIfChanged(document.documentElement, "themeMode", currentThemeMode);
+    setStyleValueIfChanged(document.documentElement, "colorScheme", resolvedTheme);
+    setDatasetValueIfChanged(document.body, "theme", resolvedTheme);
+    setDatasetValueIfChanged(document.body, "themeMode", currentThemeMode);
     syncThemeChoice();
   }
 
@@ -991,7 +1127,8 @@
       const source = node.__xposterSourceText || node.nodeValue.replace(currentTrimmed, sourceTrimmed);
       node.__xposterSourceText = source;
       const translated = translateText(source.trim());
-      node.nodeValue = source.replace(source.trim(), translated);
+      const nextValue = source.replace(source.trim(), translated);
+      if (node.nodeValue !== nextValue) node.nodeValue = nextValue;
     }
   }
 
@@ -1003,28 +1140,33 @@
         const current = element.getAttribute(attr);
         const source = element.dataset[key] || sourceText(current) || current;
         element.dataset[key] = source;
-        element.setAttribute(attr, translateText(source));
+        const translated = translateText(source);
+        if (current !== translated) element.setAttribute(attr, translated);
       }
     });
   }
 
-  function translateDynamicDom(root = document.body) {
+  function syncLanguageEnvironment() {
+    document.documentElement.lang = i18n?.htmlLang?.(currentLanguage) || (currentLanguage === "zh" ? "zh-CN" : "en");
+    setDatasetValueIfChanged(document.body, "language", currentLanguage);
+    setDatasetValueIfChanged(document.body, "languagePreference", i18n?.preference?.() || currentLanguage);
+  }
+
+  function translateDynamicDom(root = document.body, { syncEnvironment = true } = {}) {
     i18n?.renderDom(root);
     translateNodeText(root);
     translateAttributes(root);
     translateEvidencePlaceholder(root);
-    document.documentElement.lang = i18n?.htmlLang?.(currentLanguage) || (currentLanguage === "zh" ? "zh-CN" : "en");
-    document.body.dataset.language = currentLanguage;
-    document.body.dataset.languagePreference = i18n?.preference?.() || currentLanguage;
+    if (syncEnvironment) syncLanguageEnvironment();
   }
 
   function translateVisibleWorkspace() {
-    translateDynamicDom(document.querySelector(".topbar") || document.body);
-    translateDynamicDom(document.querySelector(".tabs") || document.body);
-    document.querySelectorAll(".panel.active").forEach((panel) => translateDynamicDom(panel));
-    document.documentElement.lang = i18n?.htmlLang?.(currentLanguage) || (currentLanguage === "zh" ? "zh-CN" : "en");
-    document.body.dataset.language = currentLanguage;
-    document.body.dataset.languagePreference = i18n?.preference?.() || currentLanguage;
+    translateDynamicDom(workspaceTopbar || document.body, { syncEnvironment: false });
+    translateDynamicDom(workspaceTabsContainer || document.body, { syncEnvironment: false });
+    workspacePanels.forEach((panel) => {
+      if (panel.classList.contains("active")) translateDynamicDom(panel, { syncEnvironment: false });
+    });
+    syncLanguageEnvironment();
   }
 
   function localizeText(text) {
@@ -1053,8 +1195,8 @@
 
   function closeLanguageMenu({ focusButton = false } = {}) {
     if (!els.languageOptionsList || !els.languageSelectButton) return;
-    els.languageOptionsList.hidden = true;
-    els.languageSelectButton.setAttribute("aria-expanded", "false");
+    setBooleanPropertyIfChanged(els.languageOptionsList, "hidden", true);
+    setAttributeValueIfChanged(els.languageSelectButton, "aria-expanded", "false");
     if (focusButton) els.languageSelectButton.focus();
   }
 
@@ -1063,20 +1205,20 @@
     const value = els.languageSelect.value;
     const selectedOption = els.languageSelect.selectedOptions?.[0];
     const selectedLabel = selectedOption?.textContent || languageOptionLabel(i18n?.languageOptions?.().find((option) => option.code === value)) || value;
-    els.languageSelectValue.textContent = selectedLabel;
-    els.languageOptionsList.querySelectorAll("[data-language-option]").forEach((button) => {
+    setTextContentIfChanged(els.languageSelectValue, selectedLabel);
+    languageOptionButtons.forEach((button) => {
       const selected = button.dataset.languageOption === value;
-      button.setAttribute("aria-selected", selected ? "true" : "false");
-      button.tabIndex = selected ? 0 : -1;
+      setAttributeValueIfChanged(button, "aria-selected", selected ? "true" : "false");
+      setNumericPropertyIfChanged(button, "tabIndex", selected ? 0 : -1);
     });
   }
 
   function openLanguageMenu() {
     if (!els.languageOptionsList || !els.languageSelectButton) return;
-    els.languageOptionsList.hidden = false;
-    els.languageSelectButton.setAttribute("aria-expanded", "true");
+    setBooleanPropertyIfChanged(els.languageOptionsList, "hidden", false);
+    setAttributeValueIfChanged(els.languageSelectButton, "aria-expanded", "true");
     syncLanguageButton();
-    const selected = els.languageOptionsList.querySelector('[aria-selected="true"]');
+    const selected = languageOptionButtons.find((button) => button.getAttribute("aria-selected") === "true");
     selected?.focus?.();
   }
 
@@ -1088,12 +1230,12 @@
 
   function focusLanguageOption(delta) {
     if (!els.languageOptionsList || els.languageOptionsList.hidden) return;
-    const options = Array.from(els.languageOptionsList.querySelectorAll("[data-language-option]"));
+    const options = languageOptionButtons;
     if (!options.length) return;
     const currentIndex = Math.max(0, options.indexOf(document.activeElement));
     const nextIndex = (currentIndex + delta + options.length) % options.length;
     options.forEach((option, index) => {
-      option.tabIndex = index === nextIndex ? 0 : -1;
+      setNumericPropertyIfChanged(option, "tabIndex", index === nextIndex ? 0 : -1);
     });
     options[nextIndex].focus();
   }
@@ -1128,39 +1270,163 @@
   function populateLanguageSelect() {
     if (!els.languageSelect || !i18n?.languageOptions) return;
     const options = i18n.languageOptions();
-    els.languageSelect.innerHTML = options
+    const selectHtml = options
       .map((option) => {
         const label = languageOptionLabel(option);
         return `<option value="${shared.escapeHtml(option.code)}">${shared.escapeHtml(label)}</option>`;
       })
       .join("");
-    els.languageSelect.value = i18n.preference?.() || currentLanguage;
+    setSourceHtmlIfChanged(els.languageSelect, selectHtml);
+    setPropertyValueIfChanged(els.languageSelect, "value", i18n.preference?.() || currentLanguage);
     if (els.languageOptionsList) {
-      els.languageOptionsList.innerHTML = options
+      const optionsHtml = options
         .map((option) => {
           const label = shared.escapeHtml(languageOptionLabel(option));
           const value = shared.escapeHtml(option.code);
           return `<button class="language-option" type="button" role="option" data-language-option="${value}" aria-selected="false" tabindex="-1">${label}</button>`;
         })
         .join("");
+      setSourceHtmlIfChanged(els.languageOptionsList, optionsHtml);
+      languageOptionButtons = collectLanguageOptionButtons();
+    } else {
+      languageOptionButtons = [];
     }
     syncLanguageButton();
   }
 
   function setLocalizedText(node, source) {
-    if (!node) return;
-    delete node.dataset.i18n;
-    node.__xposterSourceText = source;
-    node.textContent = localizeText(source);
-    if (node.firstChild?.nodeType === Node.TEXT_NODE) node.firstChild.__xposterSourceText = source;
+    setLocalizedTextIfChanged(node, source);
   }
 
   function setLocalizedMessage(node, key, values = {}) {
+    setLocalizedMessageIfChanged(node, key, values);
+  }
+
+  function setDatasetValueIfChanged(node, key, value) {
+    if (!node || !key || node.dataset[key] === value) return;
+    node.dataset[key] = value;
+  }
+
+  function removeDatasetValueIfChanged(node, key) {
+    if (!node || !key || !(key in node.dataset)) return;
+    delete node.dataset[key];
+  }
+
+  function setStyleValueIfChanged(node, property, value) {
+    if (!node || !property || node.style[property] === value) return;
+    node.style[property] = value;
+  }
+
+  function setStylePropertyIfChanged(node, property, value) {
+    if (!node || !property) return;
+    const text = String(value ?? "");
+    if (node.style.getPropertyValue(property) === text) return;
+    node.style.setProperty(property, text);
+  }
+
+  function setClassNameIfChanged(node, value) {
+    if (!node || node.className === value) return;
+    node.className = value;
+  }
+
+  function setClassPresenceIfChanged(node, className, present) {
+    if (!node || !className || node.classList.contains(className) === present) return;
+    node.classList.toggle(className, present);
+  }
+
+  function setAttributeValueIfChanged(node, attribute, value) {
+    if (!node || !attribute || node.getAttribute(attribute) === value) return;
+    node.setAttribute(attribute, value);
+  }
+
+  function setBooleanPropertyIfChanged(node, property, value) {
+    if (!node || !property || node[property] === value) return;
+    node[property] = value;
+  }
+
+  function setPropertyValueIfChanged(node, property, value) {
+    if (!node || !property || node[property] === value) return;
+    node[property] = value;
+  }
+
+  function setNumericPropertyIfChanged(node, property, value) {
+    if (!node || !property) return;
+    const next = Number(value || 0);
+    if (node[property] === next) return;
+    node[property] = next;
+  }
+
+  function syncScrollPositionIfChanged(target, source) {
+    if (!target || !source) return;
+    setNumericPropertyIfChanged(target, "scrollTop", source.scrollTop);
+    setNumericPropertyIfChanged(target, "scrollLeft", source.scrollLeft);
+  }
+
+  function setTextContentIfChanged(node, value) {
     if (!node) return;
-    delete node.dataset.i18n;
-    node.__xposterSourceText = key;
-    node.textContent = localizeInterpolated(key, values);
+    const text = String(value ?? "");
+    if (node.textContent !== text) node.textContent = text;
+  }
+
+  function setSourceHtmlIfChanged(node, html) {
+    if (!node) return false;
+    const source = String(html ?? "");
+    if (node.__xposterSourceHtml === source) return false;
+    node.__xposterSourceHtml = source;
+    if (node.innerHTML !== source) node.innerHTML = source;
+    return true;
+  }
+
+  function setLocalizedTextIfChanged(node, source) {
+    if (!node) return;
+    const text = localizeText(source);
+    if (node.dataset.i18n) delete node.dataset.i18n;
+    if (node.__xposterSourceText !== source) node.__xposterSourceText = source;
+    if (node.textContent !== text) node.textContent = text;
+    if (node.firstChild?.nodeType === Node.TEXT_NODE) node.firstChild.__xposterSourceText = source;
+  }
+
+  function setLocalizedMessageIfChanged(node, key, values = {}) {
+    if (!node) return;
+    const text = localizeInterpolated(key, values);
+    if (node.dataset.i18n) delete node.dataset.i18n;
+    if (node.__xposterSourceText !== key) node.__xposterSourceText = key;
+    if (node.textContent !== text) node.textContent = text;
     if (node.firstChild?.nodeType === Node.TEXT_NODE) node.firstChild.__xposterSourceText = key;
+  }
+
+  function statusRowNodes(item) {
+    if (!item) return {};
+    const cached = rowQueryCache.get(item);
+    if (
+      cached &&
+      (!cached.label || item.contains(cached.label)) &&
+      (!cached.detail || item.contains(cached.detail)) &&
+      (!cached.status || item.contains(cached.status))
+    ) {
+      return cached;
+    }
+    const nodes = {
+      label: item.querySelector("strong"),
+      detail: item.querySelector("div > span"),
+      status: item.querySelector("em")
+    };
+    rowQueryCache.set(item, nodes);
+    return nodes;
+  }
+
+  function syncStatusRow(item, { tone, label, detail, status } = {}) {
+    if (!item) return;
+    const nodes = statusRowNodes(item);
+    if (tone !== undefined) setDatasetValueIfChanged(item, "tone", tone);
+    if (label !== undefined) setLocalizedTextIfChanged(nodes.label, label);
+    if (detail !== undefined) setLocalizedTextIfChanged(nodes.detail, detail);
+    if (status !== undefined) setLocalizedTextIfChanged(nodes.status, status);
+  }
+
+  function syncVisibilityState(node, hidden) {
+    setBooleanPropertyIfChanged(node, "hidden", hidden);
+    setAttributeValueIfChanged(node, "aria-hidden", hidden ? "true" : "false");
   }
 
   function setEvidenceRecordMeta(kind, capturedAt = new Date()) {
@@ -1177,7 +1443,7 @@
     const source = "Run a publishing check or import to save a record.";
     const current = els.evidenceText.textContent.trim();
     if (current === source || current === ZH_TEXT.get(source) || current === shared.toTraditionalChinese(ZH_TEXT.get(source))) {
-      els.evidenceText.textContent = translateText(source);
+      setLocalizedTextIfChanged(els.evidenceText, source);
     }
   }
 
@@ -1259,17 +1525,20 @@
   }
 
   function localImageReferences(parsed = latestParsed) {
-    const references = localImageSegments(parsed).map((segment) => ({
-      role: "body",
-      source: segment.source,
-      segment
-    }));
     const coverSource = importOptions.setCover === false ? "" : String(parsed?.cover || "").trim();
-    if (
-      coverSource &&
-      shared.isLocalImageSource(coverSource) &&
-      !references.some((item) => shared.imageSourcesMatch(item.source, coverSource))
-    ) {
+    const coverIsLocal = Boolean(coverSource && shared.isLocalImageSource(coverSource));
+    const references = [];
+    let coverInBody = false;
+    for (const segment of parsed?.segments || []) {
+      if (segment.type !== "image" || !shared.isLocalImageSource(segment.source)) continue;
+      if (coverIsLocal && !coverInBody && shared.imageSourcesMatch(segment.source, coverSource)) coverInBody = true;
+      references.push({
+        role: "body",
+        source: segment.source,
+        segment
+      });
+    }
+    if (coverIsLocal && !coverInBody) {
       references.push({
         role: "cover",
         source: coverSource,
@@ -1280,7 +1549,10 @@
   }
 
   function localImageFolderStatusForReferences(references = [], vault = currentVault()) {
-    const absoluteCount = references.filter((item) => shared.isAbsoluteLocalImageSource(item.source)).length;
+    let absoluteCount = 0;
+    for (const item of references) {
+      if (shared.isAbsoluteLocalImageSource(item.source)) absoluteCount += 1;
+    }
     const folderReady = Boolean(vault?.configured && vault.permission === "granted");
     return {
       references,
@@ -1297,15 +1569,29 @@
   }
 
   function localImageReferencesForMarkdowns(markdowns = [], options = importOptions) {
+    return localImageReferencesForParsedDrafts(parsedDraftsForMarkdowns(markdowns, options));
+  }
+
+  function localImageReferencesForParsedDrafts(parsedDrafts = []) {
     const references = [];
-    markdowns.forEach((markdown, index) => {
+    for (const item of parsedDrafts || []) {
       try {
-        for (const reference of localImageReferences(parseDraftMarkdown(markdown || "", options))) {
-          references.push({ ...reference, draftIndex: index });
+        for (const reference of localImageReferences(item.parsed)) {
+          references.push({ ...reference, draftIndex: item.index });
         }
       } catch {}
-    });
+    }
     return references;
+  }
+
+  function parsedDraftsForMarkdowns(markdowns = [], options = importOptions) {
+    const parsedDrafts = [];
+    markdowns.forEach((markdown, index) => {
+      try {
+        parsedDrafts.push({ index, parsed: parseDraftMarkdown(markdown || "", options) });
+      } catch {}
+    });
+    return parsedDrafts;
   }
 
   function localImageFolderStatusForMarkdowns(markdowns = [], options = importOptions, vault = currentVault()) {
@@ -1323,17 +1609,24 @@
   }
 
   function remoteHttpImageSegmentsIncludingCover(parsed = latestParsed) {
-    const segments = (parsed?.segments || []).filter((segment) => segment.type === "image" && isRemoteHttpImageSource(segment.source));
     const cover = String(parsed?.cover || "").trim();
-    if (cover && isRemoteHttpImageSource(cover) && !segments.some((segment) => shared.imageSourcesMatch(segment.source, cover))) {
+    const coverIsRemote = Boolean(cover && isRemoteHttpImageSource(cover));
+    const segments = [];
+    let coverInBody = false;
+    for (const segment of parsed?.segments || []) {
+      if (segment.type !== "image" || !isRemoteHttpImageSource(segment.source)) continue;
+      if (coverIsRemote && !coverInBody && shared.imageSourcesMatch(segment.source, cover)) coverInBody = true;
+      segments.push(segment);
+    }
+    if (coverIsRemote && !coverInBody) {
       segments.push({ type: "image", source: cover, alt: "cover" });
     }
     return segments;
   }
 
-  function remoteImageOriginCounts(parsed = latestParsed) {
+  function remoteImageOriginCountsFromSegments(segments = []) {
     const counts = new Map();
-    for (const segment of remoteHttpImageSegments(parsed)) {
+    for (const segment of segments || []) {
       try {
         const origin = new URL(segment.source).origin;
         counts.set(origin, (counts.get(origin) || 0) + 1);
@@ -1342,8 +1635,26 @@
     return counts;
   }
 
+  function remoteImageOriginsFromSegments(segments = []) {
+    return Array.from(remoteImageOriginCountsFromSegments(segments).keys());
+  }
+
+  function remoteImageEvidenceFromSegments(segments = []) {
+    const imageSegments = segments || [];
+    return {
+      count: imageSegments.length,
+      origins: remoteImageOriginsFromSegments(imageSegments),
+      access: remoteImageAccessStatus,
+      probe: remoteImageProbeStatus
+    };
+  }
+
+  function remoteImageOriginCounts(parsed = latestParsed) {
+    return remoteImageOriginCountsFromSegments(remoteHttpImageSegments(parsed));
+  }
+
   function remoteImageOrigins(parsed = latestParsed) {
-    return Array.from(remoteImageOriginCounts(parsed).keys());
+    return remoteImageOriginsFromSegments(remoteHttpImageSegments(parsed));
   }
 
   function addSegmentCounts(target, source) {
@@ -1354,10 +1665,14 @@
   }
 
   function markdownsSegmentCounts(markdowns = [], options = importOptions) {
+    return segmentCountsForParsedDrafts(parsedDraftsForMarkdowns(markdowns, options));
+  }
+
+  function segmentCountsForParsedDrafts(parsedDrafts = []) {
     const counts = shared.segmentCounts([]);
-    for (const markdown of markdowns) {
+    for (const item of parsedDrafts || []) {
       try {
-        addSegmentCounts(counts, shared.segmentCounts(parseDraftMarkdown(markdown || "", options).segments));
+        addSegmentCounts(counts, shared.segmentCounts(item.parsed?.segments || []));
       } catch {}
     }
     return counts;
@@ -1390,6 +1705,7 @@
 
   function preflightSegmentCounts(context = {}) {
     if (context.counts) return context.counts;
+    if (Array.isArray(context.parsedDrafts)) return segmentCountsForParsedDrafts(context.parsedDrafts);
     const markdowns = preflightMarkdowns(context);
     if (markdowns) return markdownsSegmentCounts(markdowns, importOptions);
     const parsed = preflightParsed(context);
@@ -1397,6 +1713,9 @@
   }
 
   function preflightLocalImageFolderStatus(context = {}, vault = currentVault()) {
+    if (Array.isArray(context.parsedDrafts)) {
+      return localImageFolderStatusForReferences(localImageReferencesForParsedDrafts(context.parsedDrafts), vault);
+    }
     const markdowns = preflightMarkdowns(context);
     if (markdowns) return localImageFolderStatusForMarkdowns(markdowns, importOptions, vault);
     return localImageFolderStatus(preflightParsed(context), vault);
@@ -1417,14 +1736,21 @@
         overSoftLimit: false
       };
     }
-    const bodyImages = parsed.segments.filter((segment) => segment.type === "image").length;
-    const tables = parsed.segments.filter((segment) => segment.type === "table").length;
     const coverSource = importOptions.setCover === false ? "" : String(parsed.cover || "").trim();
-    const coverOnly = coverSource && !parsed.segments.some(
-      (segment) => segment.type === "image" && shared.imageSourcesMatch(segment.source, coverSource)
-    )
-      ? 1
-      : 0;
+    let bodyImages = 0;
+    let tables = 0;
+    let coverInBody = false;
+    for (const segment of parsed.segments) {
+      if (segment.type === "image") {
+        bodyImages += 1;
+        if (coverSource && !coverInBody && shared.imageSourcesMatch(segment.source, coverSource)) {
+          coverInBody = true;
+        }
+      } else if (segment.type === "table") {
+        tables += 1;
+      }
+    }
+    const coverOnly = coverSource && !coverInBody ? 1 : 0;
     const total = bodyImages + tables + coverOnly;
     return {
       bodyImages,
@@ -1437,6 +1763,10 @@
   }
 
   function mediaUploadEstimateForMarkdowns(markdowns = [], options = importOptions) {
+    return mediaUploadEstimateForParsedDrafts(parsedDraftsForMarkdowns(markdowns, options));
+  }
+
+  function mediaUploadEstimateForParsedDrafts(parsedDrafts = []) {
     const totals = {
       bodyImages: 0,
       tables: 0,
@@ -1446,18 +1776,18 @@
       overSoftLimit: false,
       overItems: []
     };
-    markdowns.forEach((markdown, index) => {
+    for (const item of parsedDrafts || []) {
       try {
-        const estimate = mediaUploadEstimate(parseDraftMarkdown(markdown || "", options));
+        const estimate = mediaUploadEstimate(item.parsed);
         totals.bodyImages += estimate.bodyImages || 0;
         totals.tables += estimate.tables || 0;
         totals.coverOnly += estimate.coverOnly || 0;
         totals.total += estimate.total || 0;
         totals.nearSoftLimit = totals.nearSoftLimit || Boolean(estimate.nearSoftLimit);
         totals.overSoftLimit = totals.overSoftLimit || Boolean(estimate.overSoftLimit);
-        if (estimate.overSoftLimit) totals.overItems.push({ index, estimate });
+        if (estimate.overSoftLimit) totals.overItems.push({ index: item.index, estimate });
       } catch {}
-    });
+    }
     return totals;
   }
 
@@ -1553,48 +1883,45 @@
     syncDraftMediaAlert();
   }
 
+  function setDraftMediaAlertState({ hidden, tone = "", role = "alert", live = "assertive" }) {
+    setBooleanPropertyIfChanged(els.draftMediaAlert, "hidden", hidden);
+    if (tone) setDatasetValueIfChanged(els.draftMediaAlert, "tone", tone);
+    else removeDatasetValueIfChanged(els.draftMediaAlert, "tone");
+    setAttributeValueIfChanged(els.draftMediaAlert, "role", role);
+    setAttributeValueIfChanged(els.draftMediaAlert, "aria-live", live);
+  }
+
+  function setMediaLimitAlertDetail(estimate = mediaUploadEstimate()) {
+    if (!els.draftMediaAlertDetail) return;
+    const values = mediaNoteValues(estimate);
+    const text = i18n
+      ? i18n.t(X_ARTICLE_MEDIA_LIMIT_WARNING, values)
+      : mediaLimitWarningText(estimate);
+    removeDatasetValueIfChanged(els.draftMediaAlertDetail, "i18n");
+    els.draftMediaAlertDetail.__xposterSourceText = X_ARTICLE_MEDIA_LIMIT_WARNING;
+    setTextContentIfChanged(els.draftMediaAlertDetail, text);
+    if (els.draftMediaAlertDetail.firstChild?.nodeType === Node.TEXT_NODE) {
+      els.draftMediaAlertDetail.firstChild.__xposterSourceText = X_ARTICLE_MEDIA_LIMIT_WARNING;
+    }
+  }
+
   function syncDraftMediaAlert(estimate = mediaUploadEstimate()) {
     if (!els.draftMediaAlert) return;
     if (estimate?.overSoftLimit) {
-      els.draftMediaAlert.dataset.tone = "danger";
-      els.draftMediaAlert.setAttribute("role", "alert");
-      els.draftMediaAlert.setAttribute("aria-live", "assertive");
-      els.draftMediaAlert.hidden = false;
-      if (els.draftMediaAlertTitle) setLocalizedText(els.draftMediaAlertTitle, "Too many images");
-      if (els.draftMediaAlertDetail) {
-        const values = mediaNoteValues(estimate);
-        delete els.draftMediaAlertDetail.dataset.i18n;
-        els.draftMediaAlertDetail.__xposterSourceText = X_ARTICLE_MEDIA_LIMIT_WARNING;
-        els.draftMediaAlertDetail.textContent = i18n
-          ? i18n.t(X_ARTICLE_MEDIA_LIMIT_WARNING, values)
-          : mediaLimitWarningText(estimate);
-      }
+      setDraftMediaAlertState({ hidden: false, tone: "danger" });
+      setLocalizedTextIfChanged(els.draftMediaAlertTitle, "Too many images");
+      setMediaLimitAlertDetail(estimate);
       return;
     }
     if (batchWriteProgress?.total > 1) {
-      els.draftMediaAlert.dataset.tone = batchWriteProgressTone();
-      els.draftMediaAlert.setAttribute("role", "status");
-      els.draftMediaAlert.setAttribute("aria-live", "polite");
-      els.draftMediaAlert.hidden = false;
-      if (els.draftMediaAlertTitle) setLocalizedText(els.draftMediaAlertTitle, batchWriteProgressTitle());
-      if (els.draftMediaAlertDetail) {
-        setLocalizedMessage(els.draftMediaAlertDetail, "Success {done}/{total} drafts", batchWriteProgressValues());
-      }
+      setDraftMediaAlertState({ hidden: false, tone: batchWriteProgressTone(), role: "status", live: "polite" });
+      setLocalizedTextIfChanged(els.draftMediaAlertTitle, batchWriteProgressTitle());
+      setLocalizedMessageIfChanged(els.draftMediaAlertDetail, "Success {done}/{total} drafts", batchWriteProgressValues());
       return;
     }
-    els.draftMediaAlert.hidden = true;
-    delete els.draftMediaAlert.dataset.tone;
-    els.draftMediaAlert.setAttribute("role", "alert");
-    els.draftMediaAlert.setAttribute("aria-live", "assertive");
-    if (els.draftMediaAlertTitle) setLocalizedText(els.draftMediaAlertTitle, "Too many images");
-    if (els.draftMediaAlertDetail) {
-      const values = mediaNoteValues(estimate);
-      delete els.draftMediaAlertDetail.dataset.i18n;
-      els.draftMediaAlertDetail.__xposterSourceText = X_ARTICLE_MEDIA_LIMIT_WARNING;
-      els.draftMediaAlertDetail.textContent = i18n
-        ? i18n.t(X_ARTICLE_MEDIA_LIMIT_WARNING, values)
-        : mediaLimitWarningText(estimate);
-    }
+    setDraftMediaAlertState({ hidden: true });
+    setLocalizedTextIfChanged(els.draftMediaAlertTitle, "Too many images");
+    setMediaLimitAlertDetail(estimate);
   }
 
   function remoteImagePermissionPattern(origin) {
@@ -1640,11 +1967,15 @@
   }
 
   function remoteHttpImageSegmentsForMarkdowns(markdowns = [], options = importOptions) {
+    return remoteHttpImageSegmentsForParsedDrafts(parsedDraftsForMarkdowns(markdowns, options));
+  }
+
+  function remoteHttpImageSegmentsForParsedDrafts(parsedDrafts = []) {
     const seen = new Set();
     const segments = [];
-    for (const markdown of markdowns) {
+    for (const item of parsedDrafts || []) {
       try {
-        for (const segment of remoteHttpImageSegments(parseDraftMarkdown(markdown || "", options))) {
+        for (const segment of remoteHttpImageSegments(item.parsed)) {
           const source = String(segment.source || "");
           if (!source || seen.has(source)) continue;
           seen.add(source);
@@ -1691,7 +2022,7 @@
 
   function updateDraftBrief() {
     const hasDraft = Boolean(latestParsed?.segments?.length);
-    if (els.draftPanel) els.draftPanel.dataset.emptyDraft = hasDraft || queueModeActive() ? "false" : "true";
+    setDatasetValueIfChanged(els.draftPanel, "emptyDraft", hasDraft || queueModeActive() ? "false" : "true");
   }
 
   function remoteImageProbeKey(segment) {
@@ -1701,10 +2032,14 @@
   function resetRemoteImageProbeStatus(parsed = latestParsed) {
     const images = remoteHttpImageSegments(parsed);
     const existing = new Map((remoteImageProbeStatus.results || []).map((item) => [item.source, item]));
-    const results = images.map((segment, index) => {
+    const results = [];
+    let ok = 0;
+    let fail = 0;
+    let pending = 0;
+    images.forEach((segment, index) => {
       const source = remoteImageProbeKey(segment);
       const previous = existing.get(source);
-      return previous
+      const result = previous
         ? { ...previous, index: index + 1 }
         : {
             index: index + 1,
@@ -1715,17 +2050,18 @@
             bytes: null,
             mime: ""
           };
+      if (result.ok === true) ok += 1;
+      else if (result.ok === false) fail += 1;
+      else pending += 1;
+      results.push(result);
     });
-    const allCurrentImagesHaveResults =
-      images.length > 0 &&
-      results.length === images.length &&
-      results.every((item) => item.ok === true || item.ok === false);
+    const allCurrentImagesHaveResults = images.length > 0 && pending === 0;
     const checkedAt = images.length ? remoteImageProbeStatus.checkedAt : null;
     remoteImageProbeStatus = {
       state: allCurrentImagesHaveResults ? "checked" : "idle",
       total: images.length,
-      ok: results.filter((item) => item.ok === true).length,
-      fail: results.filter((item) => item.ok === false).length,
+      ok,
+      fail,
       results,
       checkedAt
     };
@@ -1823,12 +2159,7 @@
         counts,
         blocks: parsed?.segments?.length || 0,
         characters: markdown.length,
-        remoteImages: {
-          count: remoteImages.length,
-          origins: remoteImageOrigins(parsed),
-          access: remoteImageAccessStatus,
-          probe: remoteImageProbeStatus
-        },
+        remoteImages: remoteImageEvidenceFromSegments(remoteImages),
         localImages
       },
       importPlan: buildPreviewPlan(parsed),
@@ -1970,7 +2301,7 @@
   function syncActiveQueueWithDraft() {
     if (!activeQueueItemId) return;
     const text = draftText();
-    const activeItem = draftQueue.find((item) => item.id === activeQueueItemId);
+    const activeItem = activeQueueItem();
     if (activeItem && activeItem.markdown === text) return;
     activeQueueItemId = null;
     activeDraftSourceFileName = "";
@@ -1994,7 +2325,7 @@
     if (nextQueue.length !== draftQueue.length) {
       draftQueue = nextQueue;
       markDraftQueueMediaStale();
-      if (activeQueueItemId && !draftQueue.some((item) => item.id === activeQueueItemId)) activeQueueItemId = null;
+      clearMissingActiveQueueItem();
       renderDraftQueue();
       log("Queue was trimmed to fit browser storage.");
     }
@@ -2039,6 +2370,16 @@
 
   function markdownFilesFrom(files) {
     return Array.from(files || []).filter(isMarkdownFile);
+  }
+
+  function summarizeMarkdownTransferFiles(files) {
+    const markdownFiles = [];
+    let hasFiles = false;
+    for (const file of Array.from(files || [])) {
+      hasFiles = true;
+      if (isMarkdownFile(file)) markdownFiles.push(file);
+    }
+    return { markdownFiles, hasFiles };
   }
 
   function showMarkdownLoadError(detail = MARKDOWN_LOAD_ERROR_DETAIL) {
@@ -2137,24 +2478,18 @@
 
   function syncDraftSurface() {
     const hasQueue = queueModeActive();
-    if (els.draftPanel) els.draftPanel.dataset.queueMode = hasQueue ? "true" : "false";
-    if (els.draftQueue) els.draftQueue.hidden = !hasQueue;
-    if (els.draftEditorShell) els.draftEditorShell.hidden = hasQueue;
-    if (els.draftEditorToolbar) els.draftEditorToolbar.hidden = hasQueue;
-    if (els.draftEditorStatus) els.draftEditorStatus.hidden = hasQueue;
+    setDatasetValueIfChanged(els.draftPanel, "queueMode", hasQueue ? "true" : "false");
+    setBooleanPropertyIfChanged(els.draftQueue, "hidden", !hasQueue);
+    setBooleanPropertyIfChanged(els.draftEditorShell, "hidden", hasQueue);
+    setBooleanPropertyIfChanged(els.draftEditorToolbar, "hidden", hasQueue);
+    setBooleanPropertyIfChanged(els.draftEditorStatus, "hidden", hasQueue);
     if (hasQueue) {
-      if (els.draftEditorInputWrap) {
-        els.draftEditorInputWrap.hidden = true;
-        els.draftEditorInputWrap.setAttribute("aria-hidden", "true");
-      }
+      syncVisibilityState(els.draftEditorInputWrap, true);
       if (els.markdown) {
-        els.markdown.setAttribute("aria-hidden", "true");
-        els.markdown.tabIndex = -1;
+        setAttributeValueIfChanged(els.markdown, "aria-hidden", "true");
+        setNumericPropertyIfChanged(els.markdown, "tabIndex", -1);
       }
-      if (els.draftInlinePreview) {
-        els.draftInlinePreview.hidden = true;
-        els.draftInlinePreview.setAttribute("aria-hidden", "true");
-      }
+      syncVisibilityState(els.draftInlinePreview, true);
     } else {
       setDraftEditorMode(draftEditorMode);
     }
@@ -2168,7 +2503,7 @@
       : [];
     draftQueueMediaReady = !draftQueue.length;
     activeQueueItemId = draftQueue.find((item) => item.status === "loaded")?.id || activeQueueItemId;
-    if (activeQueueItemId && !draftQueue.some((item) => item.id === activeQueueItemId)) activeQueueItemId = null;
+    clearMissingActiveQueueItem();
     activeDraftSourceFileName = queueItemSourceFileName(activeQueueItemId);
     renderDraftQueue();
   }
@@ -2176,7 +2511,7 @@
   function restoreDraftFromStoredValue(value, { analyze = true } = {}) {
     const restored = String(value || "");
     if (queueModeActive()) {
-      const activeItem = draftQueue.find((item) => item.id === activeQueueItemId) || draftQueue[0];
+      const activeItem = activeQueueItem() || draftQueue[0];
       activeDraftSourceFileName = normalizeSourceFileName(activeItem?.fileName);
       suppressNextTypedHistory = true;
       window.clearTimeout(draftInputHistoryTimer);
@@ -2292,14 +2627,14 @@
     if (!els.draftQueue || !els.draftQueueList) return;
     syncDraftSurface();
     const hasQueue = queueModeActive();
-    if (els.draftQueueMeta) setLocalizedText(els.draftQueueMeta, queueSummaryText());
+    if (els.draftQueueMeta) setLocalizedTextIfChanged(els.draftQueueMeta, queueSummaryText());
     if (!hasQueue) {
-      els.draftQueueList.innerHTML = "";
+      setSourceHtmlIfChanged(els.draftQueueList, "");
       updateWriteButton();
       return;
     }
     const safe = shared.escapeHtml;
-    els.draftQueueList.innerHTML = draftQueue.map((item, index) => {
+    const queueHtml = draftQueue.map((item, index) => {
       const mediaSummary = queueItemMediaSummary(item);
       return `
       <li class="draft-queue-item" data-queue-id="${safe(item.id)}" data-status="${safe(item.status)}" data-media="${safe(mediaSummary.tone)}" ${animatedQueueItemIds.has(item.id) ? 'data-motion="entered"' : ""} ${item.id === activeQueueItemId ? 'data-active="true"' : ""}>
@@ -2319,7 +2654,7 @@
       </li>
     `;
     }).join("");
-    translateDynamicDom(els.draftQueue);
+    if (setSourceHtmlIfChanged(els.draftQueueList, queueHtml)) translateDynamicDom(els.draftQueue);
     updateWriteButton();
     scheduleDraftQueueMediaRender();
   }
@@ -2371,7 +2706,7 @@
       return;
     }
     if (button.dataset.queueAction === "copy") {
-      const item = draftQueue.find((entry) => entry.id === id);
+      const item = queueItemById(id);
       await copyMarkdownText(item?.markdown || "", { success: "Queued Markdown copied." });
       return;
     }
@@ -2408,7 +2743,7 @@
       log("Queued draft removed.");
       return true;
     }
-    if (wasActive || !activeQueueItemId || !draftQueue.some((entry) => entry.id === activeQueueItemId)) {
+    if (wasActive || !activeQueueItemId || !clearMissingActiveQueueItem()) {
       const nextItem = draftQueue[Math.min(index, draftQueue.length - 1)];
       loadQueueItem(nextItem.id, { persist: false, remember: false });
     } else {
@@ -2423,7 +2758,7 @@
   }
 
   function loadQueueItem(id, { persist = true, remember = true } = {}) {
-    const item = draftQueue.find((entry) => entry.id === id);
+    const item = queueItemById(id);
     if (!item) return false;
     activeQueueItemId = item.id;
     activeDraftSourceFileName = normalizeSourceFileName(item.fileName);
@@ -2486,7 +2821,7 @@
   }
 
   function updateQueueItemMarkdown(id, markdown) {
-    const item = draftQueue.find((entry) => entry.id === id);
+    const item = queueItemById(id);
     const text = String(markdown || "");
     if (!item || !text.trim()) return false;
     const updated = {
@@ -2523,9 +2858,9 @@
 
   function setMarkdownEditorOpen(open) {
     if (!els.recordEditSheet) return;
-    els.recordEditSheet.hidden = !open;
-    document.body.dataset.modalOpen = open ? "true" : "false";
-    document.documentElement.dataset.modalOpen = open ? "true" : "false";
+    setBooleanPropertyIfChanged(els.recordEditSheet, "hidden", !open);
+    setDatasetValueIfChanged(document.body, "modalOpen", open ? "true" : "false");
+    setDatasetValueIfChanged(document.documentElement, "modalOpen", open ? "true" : "false");
   }
 
   function recordEditorText() {
@@ -2536,14 +2871,12 @@
     if (!els.recordEditStats) return;
     const text = recordEditorText();
     const stats = editorStatsText(text, markdownSegmentCounts(text));
-    els.recordEditStats.hidden = !stats;
-    setLocalizedText(els.recordEditStats, stats);
+    setBooleanPropertyIfChanged(els.recordEditStats, "hidden", !stats);
+    setLocalizedTextIfChanged(els.recordEditStats, stats);
   }
 
   function syncRecordEditSyntaxScroll() {
-    if (!els.recordEditTextarea || !els.recordEditHighlight) return;
-    els.recordEditHighlight.scrollTop = els.recordEditTextarea.scrollTop;
-    els.recordEditHighlight.scrollLeft = els.recordEditTextarea.scrollLeft;
+    syncScrollPositionIfChanged(els.recordEditHighlight, els.recordEditTextarea);
   }
 
   function renderRecordEditHighlight() {
@@ -2554,10 +2887,12 @@
   function updateRecordEditPreview() {
     if (!els.recordEditPreviewBody) return;
     const text = recordEditorText();
-    els.recordEditPreviewBody.innerHTML = text.trim()
+    const previewHtml = text.trim()
       ? markdownPreviewHtml(text)
       : emptyMarkdownPreviewHtml();
-    translateDynamicDom(els.recordEditPreview || els.recordEditSheet);
+    if (setSourceHtmlIfChanged(els.recordEditPreviewBody, previewHtml)) {
+      translateDynamicDom(els.recordEditPreview || els.recordEditSheet);
+    }
   }
 
   function updateRecordEditModeToggle() {
@@ -2567,24 +2902,18 @@
   function updateRecordEditorMode(mode = recordEditMode) {
     recordEditMode = DRAFT_EDITOR_MODES.has(mode) ? mode : "edit";
     const isEdit = recordEditMode === "edit";
-    if (els.recordEditBody) els.recordEditBody.dataset.mode = recordEditMode;
-    if (els.recordEditInputWrap) {
-      els.recordEditInputWrap.hidden = !isEdit;
-      els.recordEditInputWrap.setAttribute("aria-hidden", isEdit ? "false" : "true");
-    }
+    setDatasetValueIfChanged(els.recordEditBody, "mode", recordEditMode);
+    syncVisibilityState(els.recordEditInputWrap, !isEdit);
     if (els.recordEditTextarea) {
-      els.recordEditTextarea.setAttribute("aria-hidden", isEdit ? "false" : "true");
-      els.recordEditTextarea.tabIndex = isEdit ? 0 : -1;
+      setAttributeValueIfChanged(els.recordEditTextarea, "aria-hidden", isEdit ? "false" : "true");
+      setNumericPropertyIfChanged(els.recordEditTextarea, "tabIndex", isEdit ? 0 : -1);
     }
-    if (els.recordEditToolbar) els.recordEditToolbar.hidden = !isEdit;
-    if (els.recordEditPreview) {
-      els.recordEditPreview.hidden = isEdit;
-      els.recordEditPreview.dataset.previewMode = "read";
-      els.recordEditPreview.setAttribute("aria-hidden", isEdit ? "true" : "false");
-    }
+    setBooleanPropertyIfChanged(els.recordEditToolbar, "hidden", !isEdit);
+    syncVisibilityState(els.recordEditPreview, isEdit);
+    setDatasetValueIfChanged(els.recordEditPreview, "previewMode", "read");
     updateRecordEditModeToggle();
-    els.recordEditToolbar?.querySelectorAll("[data-editor-command]").forEach((button) => {
-      button.disabled = !isEdit;
+    recordEditCommandButtons.forEach((button) => {
+      setBooleanPropertyIfChanged(button, "disabled", !isEdit);
     });
     if (isEdit) renderRecordEditHighlight();
     else updateRecordEditPreview();
@@ -2605,18 +2934,15 @@
   function configureMarkdownEditor({ title, meta, value, primaryLabel, mode, id }) {
     if (!els.recordEditSheet || !els.recordEditTextarea) return;
     activeDraftEditor = { mode, id };
-    if (els.recordEditTitle) els.recordEditTitle.textContent = title;
-    if (els.recordEditMeta) els.recordEditMeta.textContent = meta;
-    if (els.recordEditPrimaryLabel) {
-      els.recordEditPrimaryLabel.dataset.i18n = primaryLabel;
-      els.recordEditPrimaryLabel.textContent = primaryLabel;
-    }
-    els.recordEditTextarea.dataset.editorMode = mode;
-    els.recordEditTextarea.dataset.recordId = mode === "record" ? id : "";
-    els.recordEditTextarea.dataset.queueId = mode === "queue" || mode === "new" ? id : "";
-    els.recordEditTextarea.value = value;
+    setLocalizedTextIfChanged(els.recordEditTitle, title);
+    setLocalizedTextIfChanged(els.recordEditMeta, meta);
+    setLocalizedTextIfChanged(els.recordEditPrimaryLabel, primaryLabel);
+    setDatasetValueIfChanged(els.recordEditTextarea, "editorMode", mode);
+    setDatasetValueIfChanged(els.recordEditTextarea, "recordId", mode === "record" ? id : "");
+    setDatasetValueIfChanged(els.recordEditTextarea, "queueId", mode === "queue" || mode === "new" ? id : "");
+    setPropertyValueIfChanged(els.recordEditTextarea, "value", value);
     resetEditorHistory(els.recordEditTextarea);
-    if (els.recordEditWriteButton) els.recordEditWriteButton.hidden = mode !== "queue";
+    setBooleanPropertyIfChanged(els.recordEditWriteButton, "hidden", mode !== "queue");
     updateRecordEditorMode("edit");
     updateRecordEditorChrome();
     setMarkdownEditorOpen(true);
@@ -2715,12 +3041,12 @@
     return latestPageStatus?.vault || latestDiagnostics?.vault || null;
   }
 
-  function updateProgressiveSections() {
+  function updateProgressiveSections(context = {}) {
     const localImages = localImageSegments();
     const vault = currentVault();
     const showLocalImages = Boolean(localImages.length || vault?.configured);
-    if (els.localImagesPanel) els.localImagesPanel.hidden = !showLocalImages;
-    syncProgressiveSectionVisibility();
+    setBooleanPropertyIfChanged(els.localImagesPanel, "hidden", !showLocalImages);
+    syncProgressiveSectionVisibility(context);
   }
 
   function scheduleAnalyzeDraft(delay = DRAFT_ANALYZE_DELAY_MS) {
@@ -2741,18 +3067,22 @@
     renderDraftAnalysis();
   }
 
+  function syncDraftInspectorMetrics(parsed = null, counts = shared.segmentCounts([])) {
+    setAttributeValueIfChanged(els.inspector, "data-has-draft", parsed ? "true" : "false");
+    setTextContentIfChanged(els.titleMetric, parsed?.title || "None");
+    setTextContentIfChanged(els.imageMetric, String(counts.image || 0));
+    setTextContentIfChanged(els.tableMetric, String(counts.table || 0));
+    setTextContentIfChanged(els.tweetMetric, String(counts.tweet || 0));
+  }
+
   function renderDraftAnalysis() {
     const markdown = draftText();
     if (!markdown.trim()) {
       latestParsed = null;
       latestCounts = shared.segmentCounts([]);
-      els.inspector?.setAttribute("data-has-draft", "false");
+      syncDraftInspectorMetrics(null, latestCounts);
       syncRemoteImageAccessStatusFromDraft(null);
       updateDraftBrief();
-      els.titleMetric.textContent = "None";
-      els.imageMetric.textContent = "0";
-      els.tableMetric.textContent = "0";
-      els.tweetMetric.textContent = "0";
       renderPreview(null);
       updateConversionMap(null);
       updateImportLedger(null);
@@ -2772,7 +3102,7 @@
       const counts = shared.segmentCounts(parsed.segments);
       latestParsed = parsed;
       latestCounts = counts;
-      els.inspector?.setAttribute("data-has-draft", "true");
+      syncDraftInspectorMetrics(parsed, counts);
       syncRemoteImageAccessStatusFromDraft(parsed);
       updateDraftBrief();
       const remoteImages = remoteHttpImageSegments(parsed);
@@ -2780,14 +3110,11 @@
         refreshRemoteImageAccessStatus(parsed).catch(() => {});
       }
       if (!remoteImages.length) resetRemoteImageProbeStatus(parsed);
-      els.titleMetric.textContent = parsed.title || "None";
-      els.imageMetric.textContent = String(counts.image || 0);
-      els.tableMetric.textContent = String(counts.table || 0);
-      els.tweetMetric.textContent = String(counts.tweet || 0);
+      const imageSummary = draftImageSummary(parsed);
       renderPreview(parsed, counts);
-      updateConversionMap(parsed, counts);
+      updateConversionMap(parsed, counts, { imageSummary });
       updateImportLedger(parsed, counts);
-      renderDraftReview(parsed, counts);
+      renderDraftReview(parsed, counts, { imageSummary });
       updatePreflight();
       updateWriteButton();
       updateProgressiveSections();
@@ -2800,40 +3127,59 @@
     }
   }
 
-  function updateConversionMap(parsed, counts = null) {
+  function updateConversionMap(parsed, counts = null, context = {}) {
     if (!els.conversionMapList) return;
-    const rows = buildConversionMap(parsed, counts || (parsed ? shared.segmentCounts(parsed.segments) : shared.segmentCounts([])));
-    const ready = rows.filter((row) => row.tone === "ok" || row.tone === "ready").length;
-    const active = rows.filter((row) => row.count > 0).length;
-    els.conversionMapMeta.textContent = parsed
-      ? `${active} content type(s) found; ${ready}/${rows.length} ready to import.`
-      : "Load Markdown to see text, images, tables, tweets, code, and dividers.";
+    const rows = buildConversionMap(parsed, counts || (parsed ? shared.segmentCounts(parsed.segments) : shared.segmentCounts([])), context);
+    let ready = 0;
+    let active = 0;
     for (const row of rows) {
-      const item = els.conversionMapList.querySelector(`[data-map="${row.id}"]`);
-      if (!item) continue;
-      item.dataset.tone = row.tone;
-      item.querySelector("strong").textContent = row.label;
-      item.querySelector("span").textContent = row.detail;
-      item.querySelector("em").textContent = row.countLabel || String(row.count);
+      if (row.tone === "ok" || row.tone === "ready") ready += 1;
+      if (row.count > 0) active += 1;
     }
-    translateDynamicDom(els.conversionMapList.closest("section"));
+    setLocalizedTextIfChanged(
+      els.conversionMapMeta,
+      parsed
+        ? `${active} content type(s) found; ${ready}/${rows.length} ready to import.`
+        : "Load Markdown to see text, images, tables, tweets, code, and dividers."
+    );
+    for (const row of rows) {
+      const item = conversionMapItems.get(row.id);
+      if (!item) continue;
+      syncStatusRow(item, {
+        tone: row.tone,
+        label: row.label,
+        detail: row.detail,
+        status: row.countLabel || String(row.count)
+      });
+    }
+    translateDynamicDom(conversionMapSection);
   }
 
   function updateImportLedger(parsed = latestParsed, counts = null) {
     if (!els.importLedgerList) return;
     const rows = buildImportLedger(parsed, counts || (parsed ? shared.segmentCounts(parsed.segments) : shared.segmentCounts([])));
     if (!parsed?.segments?.length) {
-      els.importLedgerMeta.textContent = "Load Markdown to see what each block will become.";
+      setLocalizedTextIfChanged(els.importLedgerMeta, "Load Markdown to see what each block will become.");
     } else {
-      const blocked = rows.filter((row) => row.tone === "error").length;
-      const waiting = rows.filter((row) => row.tone === "warn").length;
-      const direct = rows.filter((row) => row.path === "Write text").length;
-      const plannedRows = Math.max(0, rows.length - rows.filter((row) => row.kind === "media-limit").length);
-      els.importLedgerMeta.textContent = blocked
-        ? `${blocked} item(s) need attention; ${waiting} waiting; ${direct} text item(s) ready.`
-        : `${plannedRows} item(s) planned; ${waiting} waiting; ${direct} text item(s) ready.`;
+      let blocked = 0;
+      let waiting = 0;
+      let direct = 0;
+      let mediaLimit = 0;
+      for (const row of rows) {
+        if (row.tone === "error") blocked += 1;
+        if (row.tone === "warn") waiting += 1;
+        if (row.path === "Write text") direct += 1;
+        if (row.kind === "media-limit") mediaLimit += 1;
+      }
+      const plannedRows = Math.max(0, rows.length - mediaLimit);
+      setLocalizedTextIfChanged(
+        els.importLedgerMeta,
+        blocked
+          ? `${blocked} item(s) need attention; ${waiting} waiting; ${direct} text item(s) ready.`
+          : `${plannedRows} item(s) planned; ${waiting} waiting; ${direct} text item(s) ready.`
+      );
     }
-    els.importLedgerList.innerHTML = rows
+    let importLedgerHtml = rows
       .slice(0, 18)
       .map((row) => {
         const safe = shared.escapeHtml;
@@ -2850,7 +3196,7 @@
       })
       .join("");
     if (rows.length > 18) {
-      els.importLedgerList.innerHTML += `
+      importLedgerHtml += `
         <li data-tone="idle" data-ledger-kind="more">
           <span class="ledger-index">+</span>
           <div>
@@ -2861,7 +3207,9 @@
         </li>
       `;
     }
-    translateDynamicDom(els.importLedgerList.closest("section"));
+    if (setSourceHtmlIfChanged(els.importLedgerList, importLedgerHtml)) {
+      translateDynamicDom(importLedgerSection);
+    }
   }
 
   function buildImportLedger(parsed = latestParsed, counts = latestCounts) {
@@ -3080,14 +3428,35 @@
     return `First H1 was promoted to article title: ${title}`;
   }
 
-  function buildConversionMap(parsed, counts) {
+  function draftImageSummary(parsed = latestParsed) {
+    const imageSegments = [];
+    const remoteImages = [];
+    const localImages = localImageReferences(parsed);
+    const absoluteLocalImages = [];
+    const coverSource = String(parsed?.cover || "");
+    let coverInBody = false;
+    for (const segment of parsed?.segments || []) {
+      if (segment.type !== "image") continue;
+      imageSegments.push(segment);
+      if (isRemoteHttpImageSource(segment.source)) remoteImages.push(segment);
+      if (!coverInBody && coverSource && segment.source === coverSource) coverInBody = true;
+    }
+    for (const item of localImages) {
+      if (shared.isAbsoluteLocalImageSource(item.source)) absoluteLocalImages.push(item);
+    }
+    return {
+      imageSegments,
+      localImages,
+      remoteImages,
+      absoluteLocalImages,
+      coverInBody
+    };
+  }
+
+  function buildConversionMap(parsed, counts, context = {}) {
     const empty = !parsed?.segments?.length;
     const metadataOptions = importOptionsPayload();
-    const imageSegments = parsed?.segments?.filter((segment) => segment.type === "image") || [];
-    const localImages = localImageReferences(parsed);
-    const remoteImages = imageSegments.filter((segment) => isRemoteHttpImageSource(segment.source));
-    const absoluteLocalImages = localImages.filter((item) => shared.isAbsoluteLocalImageSource(item.source));
-    const coverInBody = Boolean(parsed?.cover && imageSegments.some((segment) => segment.source === parsed.cover));
+    const { localImages, remoteImages, absoluteLocalImages, coverInBody } = context.imageSummary || draftImageSummary(parsed);
     const status = latestPageStatus || {};
     const main = latestDiagnostics?.main || {};
     const vault = status.vault || latestDiagnostics?.vault || {};
@@ -3228,34 +3597,40 @@
     ];
   }
 
-  function renderDraftReview(parsed, counts = null) {
+  function renderDraftReview(parsed, counts = null, context = {}) {
     if (!parsed) {
-      els.reviewMeta.textContent = "Write Markdown to get publishing notes.";
-      els.reviewList.innerHTML = `<li>No draft loaded.</li>`;
-      translateDynamicDom(els.reviewList.closest("section"));
+      setLocalizedTextIfChanged(els.reviewMeta, "Write Markdown to get publishing notes.");
+      if (setSourceHtmlIfChanged(els.reviewList, `<li>No draft loaded.</li>`)) {
+        translateDynamicDom(reviewSection);
+      }
       return;
     }
-    const notes = buildDraftReview(parsed, counts || shared.segmentCounts(parsed.segments));
-    const blockers = notes.filter((note) => note.tone === "error").length;
-    const warnings = notes.filter((note) => note.tone === "warn").length;
-    els.reviewMeta.textContent = blockers
-      ? `${blockers} blocker(s), ${warnings} warning(s)`
-      : warnings
-        ? `${warnings} warning(s), no blockers`
-        : "No blockers found";
-    els.reviewList.innerHTML = notes
-      .map((note) => `<li data-tone="${note.tone}" ${note.kind ? `data-note="${shared.escapeHtml(note.kind)}"` : ""}>${shared.escapeHtml(note.text)}</li>`)
-      .join("");
-    translateDynamicDom(els.reviewList.closest("section"));
+    const notes = buildDraftReview(parsed, counts || shared.segmentCounts(parsed.segments), context);
+    let blockers = 0;
+    let warnings = 0;
+    let reviewHtml = "";
+    for (const note of notes) {
+      if (note.tone === "error") blockers += 1;
+      if (note.tone === "warn") warnings += 1;
+      reviewHtml += `<li data-tone="${note.tone}" ${note.kind ? `data-note="${shared.escapeHtml(note.kind)}"` : ""}>${shared.escapeHtml(note.text)}</li>`;
+    }
+    setLocalizedTextIfChanged(
+      els.reviewMeta,
+      blockers
+        ? `${blockers} blocker(s), ${warnings} warning(s)`
+        : warnings
+          ? `${warnings} warning(s), no blockers`
+          : "No blockers found"
+    );
+    if (setSourceHtmlIfChanged(els.reviewList, reviewHtml)) {
+      translateDynamicDom(reviewSection);
+    }
   }
 
-  function buildDraftReview(parsed, counts) {
+  function buildDraftReview(parsed, counts, context = {}) {
     const notes = [];
     const metadataOptions = importOptionsPayload();
-    const imageSegments = parsed.segments.filter((segment) => segment.type === "image");
-    const localImages = localImageReferences(parsed);
-    const remoteImages = imageSegments.filter((segment) => isRemoteHttpImageSource(segment.source));
-    const absoluteLocalImages = localImages.filter((item) => shared.isAbsoluteLocalImageSource(item.source));
+    const { localImages, remoteImages, absoluteLocalImages, coverInBody } = context.imageSummary || draftImageSummary(parsed);
     const uploadCount = (counts.image || 0) + (counts.table || 0);
 
     if (!metadataOptions.setTitle) notes.push({ tone: "idle", text: "Title setting is off; headings stay in the article body." });
@@ -3266,7 +3641,6 @@
     if (!metadataOptions.setCover) {
       notes.push({ tone: "idle", text: "Cover setting is off; images stay in the article body." });
     } else if (parsed.cover) {
-      const coverInBody = imageSegments.some((segment) => segment.source === parsed.cover);
       notes.push({
         tone: coverInBody || parsed.cover.startsWith("data:") ? "ok" : "warn",
         text: coverInBody
@@ -3321,39 +3695,55 @@
 
   function renderPreview(parsed, counts = null) {
     if (!parsed) {
-      els.previewTitle.textContent = "No title yet";
-      els.previewMeta.textContent = "Paste Markdown to see what xPoster will move into X.";
-      els.previewBody.innerHTML = `<p class="empty">This is a recognition preview. Image links stay as text in the draft box; xPoster downloads public images during Write and keeps failed downloads as links.</p>`;
-      els.planReadiness.innerHTML = `<span>Text blocks 0</span><span>Special blocks 0</span><span>Images 0</span><span>Local images 0</span>`;
-      els.planBreakdown.querySelector("p").textContent = "Load Markdown to see the plain-language import steps.";
-      els.planSteps.innerHTML = `<li><span class="plan-step-kind">Start</span><span class="plan-step-text">Paste a draft or choose a Markdown file.</span></li>`;
-      translateDynamicDom(els.previewPanel);
+      setLocalizedTextIfChanged(els.previewTitle, "No title yet");
+      setLocalizedTextIfChanged(els.previewMeta, "Paste Markdown to see what xPoster will move into X.");
+      const previewChanged = setSourceHtmlIfChanged(
+        els.previewBody,
+        `<p class="empty">This is a recognition preview. Image links stay as text in the draft box; xPoster downloads public images during Write and keeps failed downloads as links.</p>`
+      );
+      const readinessChanged = setSourceHtmlIfChanged(
+        els.planReadiness,
+        `<span>Text blocks 0</span><span>Special blocks 0</span><span>Images 0</span><span>Local images 0</span>`
+      );
+      setLocalizedTextIfChanged(planBreakdownDetail, "Load Markdown to see the plain-language import steps.");
+      const stepsChanged = setSourceHtmlIfChanged(
+        els.planSteps,
+        `<li><span class="plan-step-kind">Start</span><span class="plan-step-text">Paste a draft or choose a Markdown file.</span></li>`
+      );
+      if (previewChanged || readinessChanged || stepsChanged) translateDynamicDom(els.previewPanel);
       return;
     }
     const safe = shared.escapeHtml;
     const derivedCounts = counts || shared.segmentCounts(parsed.segments);
     const specialCount = (derivedCounts.tweet || 0) + (derivedCounts.code || 0) + (derivedCounts.divider || 0);
-    els.previewTitle.textContent = importOptions.setTitle === false ? "Article body" : parsed.title || "Untitled article";
-    els.previewMeta.textContent = [
+    setLocalizedTextIfChanged(els.previewTitle, importOptions.setTitle === false ? "Article body" : parsed.title || "Untitled article");
+    let previewMeta = [
       `${derivedCounts.text || 0} text part(s)`,
       `${derivedCounts.image || 0} image(s)`,
       `${derivedCounts.table || 0} table(s)`,
       `${specialCount} special block(s)`
     ].join(" · ");
     if (derivedCounts.image) {
-      els.previewMeta.textContent += " · image links convert during Import";
+      previewMeta += " · image links convert during Import";
     }
-    const rows = parsed.segments.slice(0, 18).map((segment) => {
-      let kind = previewKindLabel(segment);
-      let text = previewSegmentText(segment);
-      return `<div class="preview-item"><span class="preview-kind">${safe(kind)}</span><span class="preview-text">${safe(text)}</span></div>`;
-    });
-    if (parsed.segments.length > 18) {
-      rows.push(`<p class="empty">${parsed.segments.length - 18} more block(s) hidden in preview.</p>`);
+    setLocalizedTextIfChanged(els.previewMeta, previewMeta);
+    const visiblePreviewLimit = 18;
+    const rows = [];
+    for (let index = 0; index < parsed.segments.length && index < visiblePreviewLimit; index += 1) {
+      const segment = parsed.segments[index];
+      const kind = previewKindLabel(segment);
+      const text = previewSegmentText(segment);
+      rows.push(`<div class="preview-item"><span class="preview-kind">${safe(kind)}</span><span class="preview-text">${safe(text)}</span></div>`);
     }
-    els.previewBody.innerHTML = rows.join("") || `<p class="empty">No publishable blocks detected yet.</p>`;
-    renderPlanReadiness(parsed);
-    translateDynamicDom(els.previewPanel);
+    if (parsed.segments.length > visiblePreviewLimit) {
+      rows.push(`<p class="empty">${parsed.segments.length - visiblePreviewLimit} more block(s) hidden in preview.</p>`);
+    }
+    const previewBodyChanged = setSourceHtmlIfChanged(
+      els.previewBody,
+      rows.join("") || `<p class="empty">No publishable blocks detected yet.</p>`
+    );
+    const planChanged = renderPlanReadiness(parsed);
+    if (previewBodyChanged || planChanged) translateDynamicDom(els.previewPanel);
   }
 
   function previewKindLabel(segment) {
@@ -3399,7 +3789,11 @@
   function renderPlanReadiness(parsed) {
     const imageMap = new Map();
     const tableMap = new Map();
+    let textBlocks = 0;
     parsed.segments.forEach((segment, index) => {
+      if (segment.type === "text") {
+        textBlocks += 1;
+      }
       if (segment.type === "image") {
         imageMap.set(segment, {
           ok: true,
@@ -3435,80 +3829,88 @@
       coverSource,
       coverResult: coverSegment ? imageMap.get(coverSegment) : null
     });
-    const atomic = plan.plan.filter((item) => item.op.type === "atomic").length;
-    const images = plan.plan.filter((item) => item.op.type === "image").length;
-    const textBlocks = parsed.segments.filter((segment) => segment.type === "text").length;
+    let atomic = 0;
+    let images = 0;
+    for (const item of plan.plan) {
+      if (item.op.type === "atomic") atomic += 1;
+      if (item.op.type === "image") images += 1;
+    }
     const local = localImageReferences(parsed).length;
-    els.planReadiness.innerHTML = [
+    const readinessHtml = [
       `<span>Text blocks ${textBlocks}</span>`,
       `<span>Special blocks ${atomic}</span>`,
       `<span>Images ${images}</span>`,
       `<span>Local images ${local}</span>`
     ].join("");
-    renderPlanBreakdown(plan, { atomic, images, local, textBlocks });
+    const readinessChanged = setSourceHtmlIfChanged(els.planReadiness, readinessHtml);
+    return renderPlanBreakdown(plan, { atomic, images, local, textBlocks, readinessChanged });
   }
 
   function renderPlanBreakdown(plan, summary) {
-    els.planBreakdown.querySelector("p").textContent = `${summary.textBlocks} text part(s), ${summary.images} image/table upload(s), ${summary.atomic} special block(s).`;
+    setLocalizedTextIfChanged(
+      planBreakdownDetail,
+      `${summary.textBlocks} text part(s), ${summary.images} image/table upload(s), ${summary.atomic} special block(s).`
+    );
     const safe = shared.escapeHtml;
-    const steps = [
-      {
-        kind: "Write text",
-        text: summary.textBlocks
-          ? `Write ${summary.textBlocks} text part(s) into the X Article body.`
-          : "No article text was found yet."
-      },
-      ...plan.plan.map((item) => {
-        if (item.op.type === "image") {
-          const label = item.op.coverOnly ? "Cover image" : item.marker.includes("_TABLE_") ? "Table image" : "Image";
-          const fileName = item.op.file?.fileName || "prepared media";
-          return { kind: "Upload image", text: `${label} will upload as ${fileName}.` };
-        }
+    const visibleStepLimit = 8;
+    const totalSteps = 1 + plan.plan.length;
+    let renderedSteps = 0;
+    const stepItemHtml = (kind, text) => `<li><span class="plan-step-kind">${safe(kind)}</span><span class="plan-step-text">${safe(text)}</span></li>`;
+    let stepsHtml = stepItemHtml(
+      "Write text",
+      summary.textBlocks
+        ? `Write ${summary.textBlocks} text part(s) into the X Article body.`
+        : "No article text was found yet."
+    );
+    renderedSteps += 1;
+    for (const item of plan.plan) {
+      if (renderedSteps >= visibleStepLimit) break;
+      if (item.op.type === "image") {
+        const label = item.op.coverOnly ? "Cover image" : item.marker.includes("_TABLE_") ? "Table image" : "Image";
+        const fileName = item.op.file?.fileName || "prepared media";
+        stepsHtml += stepItemHtml("Upload image", `${label} will upload as ${fileName}.`);
+      } else {
         const entity = item.op.entityType === "MARKDOWN" ? "code block" : item.op.entityType === "TWEET" ? "tweet link" : "divider";
-        return { kind: "Place block", text: `${entity} will be placed where it appears in your draft.` };
-      })
-    ];
-    els.planSteps.innerHTML = steps
-      .slice(0, 8)
-      .map((step) => `<li><span class="plan-step-kind">${safe(step.kind)}</span><span class="plan-step-text">${safe(step.text)}</span></li>`)
-      .join("");
-    if (steps.length > 8) {
-      els.planSteps.innerHTML += `<li><span class="plan-step-kind">More</span><span class="plan-step-text">${steps.length - 8} more step(s) are hidden here but included during import.</span></li>`;
+        stepsHtml += stepItemHtml("Place block", `${entity} will be placed where it appears in your draft.`);
+      }
+      renderedSteps += 1;
     }
-    translateDynamicDom(els.previewPanel);
+    if (totalSteps > visibleStepLimit) {
+      stepsHtml += stepItemHtml("More", `${totalSteps - visibleStepLimit} more step(s) are hidden here but included during import.`);
+    }
+    return Boolean(summary.readinessChanged || setSourceHtmlIfChanged(els.planSteps, stepsHtml));
   }
 
-  function updatePreflight() {
-    const checks = buildPreflightChecks();
-    const readyCount = checks.filter((check) => check.tone === "ok").length;
-    els.preflightMeta.textContent = `${readyCount}/${checks.length} checks ready`;
+  function updatePreflight(checks = buildPreflightChecks()) {
+    const byId = indexPreflightChecks(checks);
+    const preflightContext = preflightEvidenceContext(checks, { byId });
+    let readyCount = 0;
     for (const check of checks) {
-      const item = els.preflightList.querySelector(`[data-check="${check.id}"]`);
+      if (check.tone === "ok") readyCount += 1;
+      const item = preflightItems.get(check.id);
       if (!item) continue;
-      item.dataset.tone = check.tone;
-      item.querySelector("strong").textContent = check.label;
-      item.querySelector("div > span").textContent = check.detail;
-      const actionButton = item.querySelector("button[data-preflight-action]");
+      syncStatusRow(item, { tone: check.tone, label: check.label, detail: check.detail });
+      const actionButton = preflightActionButtons.get(check.id);
       if (actionButton) {
-        actionButton.hidden = !check.action;
-        actionButton.dataset.preflightAction = check.action || "";
-        setLocalizedText(actionButton, check.button || "Choose");
+        setBooleanPropertyIfChanged(actionButton, "hidden", !check.action);
+        setDatasetValueIfChanged(actionButton, "preflightAction", check.action || "");
+        setLocalizedTextIfChanged(actionButton, check.button || "Choose");
       }
     }
-    const gate = getImportGate(checks);
-    if (els.importDraft?.closest(".actions")) {
-      els.importDraft.closest(".actions").dataset.empty = latestParsed?.segments?.length ? "false" : "true";
-    }
+    setLocalizedTextIfChanged(els.preflightMeta, `${readyCount}/${checks.length} checks ready`);
+    const gate = getImportGate(checks, preflightContext);
+    const actions = els.importDraft?.closest(".actions");
+    if (actions) setDatasetValueIfChanged(actions, "empty", latestParsed?.segments?.length ? "false" : "true");
     updateWriteButton();
-    updateLiveRunbook(checks, gate);
-    updateProofDeck(checks, gate);
-    updateCompletionAudit(checks, gate);
-    updateRecoveryPanel(checks, gate);
+    updateLiveRunbook(checks, gate, preflightContext);
+    updateProofDeck(checks, gate, preflightContext);
+    updateCompletionAudit(checks, gate, preflightContext);
+    updateRecoveryPanel(checks, gate, preflightContext);
     updateTargetContextPanel();
-    updateIssueQueue(checks, gate);
-    updateExecutionTimeline(checks, gate);
+    updateIssueQueue(checks, gate, preflightContext);
+    updateExecutionTimeline(checks, gate, preflightContext);
     syncRecordPanel();
-    translateDynamicDom();
+    translateDynamicDom(els.preflightPanel);
   }
 
   function primaryImportAction(gate) {
@@ -3527,8 +3929,9 @@
   async function runImportButtonAction() {
     await primeSuccessAudio();
     const checks = buildPreflightChecks();
-    const gate = getImportGate(checks);
-    const localAssetBlocker = localAssetWriteBlocker(checks);
+    const byId = indexPreflightChecks(checks);
+    const gate = getImportGate(checks, { byId });
+    const localAssetBlocker = localAssetWriteBlocker(checks, { byId });
     if (localAssetBlocker) {
       return handleLocalAssetWriteBlocker(localAssetBlocker, { chooseWhenAvailable: true });
     }
@@ -3540,12 +3943,18 @@
     return null;
   }
 
+  function importButtonLabelNode() {
+    const button = els.importDraft;
+    if (!button) return null;
+    if (importDraftNodes.label?.isConnected) return importDraftNodes.label;
+    setSourceHtmlIfChanged(button, `${importDraftNodes.iconMarkup}<span></span>`);
+    importDraftNodes.label = button.lastElementChild?.tagName === "SPAN" ? button.lastElementChild : null;
+    return importDraftNodes.label;
+  }
+
   function setImportButtonLabel(label) {
-    const svg = els.importDraft.querySelector("svg")?.outerHTML || IMPORT_ICON_SVG;
-    els.importDraft.innerHTML = `${svg}<span></span>`;
-    const labelNode = els.importDraft.querySelector("span");
-    if (labelNode) setLocalizedText(labelNode, label);
-    translateDynamicDom(els.importDraft);
+    const labelNode = importButtonLabelNode();
+    if (labelNode) setLocalizedTextIfChanged(labelNode, label);
   }
 
   function updateWriteButton({ busy = false } = {}) {
@@ -3554,7 +3963,7 @@
     const button = els.importDraft;
     if (!button) return;
     const actions = button.closest(".actions");
-    if (actions) actions.dataset.empty = hasDraft || hasQueue || busy || batchWriting ? "false" : "true";
+    setDatasetValueIfChanged(actions, "empty", hasDraft || hasQueue || busy || batchWriting ? "false" : "true");
     const needsMarkdown = !hasDraft && !hasQueue;
     const disabled = busy || batchWriting || needsMarkdown;
     const hasWriteableContent = hasDraft || hasQueue;
@@ -3565,28 +3974,27 @@
       !batchWriting &&
       !lastWriteButtonContentReady &&
       !prefersReducedMotion();
-    button.disabled = disabled;
-    button.setAttribute("aria-disabled", disabled ? "true" : "false");
-    setImportButtonLabel(
-      batchWriting
-        ? "Writing all..."
-        : busy
-          ? "Writing to X draft..."
-          : hasQueue
-            ? "Write all drafts"
-            : hasDraft
-              ? "Write to X draft"
-              : "No Markdown yet"
-    );
+    const label = batchWriting
+      ? "Writing all..."
+      : busy
+        ? "Writing to X draft..."
+        : hasQueue
+          ? "Write all drafts"
+          : hasDraft
+            ? "Write to X draft"
+            : "No Markdown yet";
+    setBooleanPropertyIfChanged(button, "disabled", disabled);
+    setAttributeValueIfChanged(button, "aria-disabled", disabled ? "true" : "false");
+    setImportButtonLabel(label);
     if (shouldRevealReadyButton) {
       window.clearTimeout(writeButtonRevealTimer);
-      button.dataset.reveal = "write-ready";
+      setDatasetValueIfChanged(button, "reveal", "write-ready");
       writeButtonRevealTimer = window.setTimeout(() => {
-        if (button.dataset.reveal === "write-ready") delete button.dataset.reveal;
+        if (button.dataset.reveal === "write-ready") removeDatasetValueIfChanged(button, "reveal");
       }, 520);
     } else if (!hasWriteableContent || busy || batchWriting) {
       window.clearTimeout(writeButtonRevealTimer);
-      delete button.dataset.reveal;
+      removeDatasetValueIfChanged(button, "reveal");
     }
     lastWriteButtonContentReady = hasWriteableContent;
     if (els.importHint) {
@@ -3595,15 +4003,14 @@
         : compactWriteHint({ hasDraft, hasQueue, busy: busy || batchWriting });
       applyImportHint(hint);
     }
-    translateDynamicDom(actions || button);
   }
 
   function compactWriteHint({ hasDraft, hasQueue = false, busy = false } = {}) {
     if (busy) return { tone: "ready", text: hasQueue ? "Writing queued drafts one by one." : "Writing into the X draft. You can watch the final result in the X Article tab." };
     if (hasQueue || !hasDraft) return quietImportHint();
     const remoteCount = remoteHttpImageSegments(latestParsed).length;
-    if (remoteCount) return remoteImageWriteHint(remoteCount);
     const mediaEstimate = mediaUploadEstimate(latestParsed);
+    if (remoteCount) return remoteImageWriteHint(remoteCount, mediaEstimate);
     if (mediaEstimate.overSoftLimit) {
       return {
         tone: "warn",
@@ -3624,21 +4031,21 @@
   }
 
   function applyImportHint(hint = quietImportHint()) {
+    if (!els.importHint) return;
     const hidden = Boolean(hint.hidden);
-    els.importHint.hidden = hidden;
-    els.importHint.setAttribute("aria-hidden", hidden ? "true" : "false");
-    els.importHint.dataset.tone = hint.tone || "ready";
-    delete els.importHint.dataset.i18n;
+    setBooleanPropertyIfChanged(els.importHint, "hidden", hidden);
+    setAttributeValueIfChanged(els.importHint, "aria-hidden", hidden ? "true" : "false");
+    setDatasetValueIfChanged(els.importHint, "tone", hint.tone || "ready");
+    removeDatasetValueIfChanged(els.importHint, "i18n");
     if (hidden) {
       delete els.importHint.__xposterSourceText;
-      els.importHint.textContent = "";
+      setTextContentIfChanged(els.importHint, "");
       return;
     }
-    setLocalizedText(els.importHint, hint.text || "");
+    setLocalizedTextIfChanged(els.importHint, hint.text || "");
   }
 
-  function remoteImageWriteHint(remoteCount) {
-    const mediaEstimate = mediaUploadEstimate(latestParsed);
+  function remoteImageWriteHint(remoteCount, mediaEstimate = mediaUploadEstimate(latestParsed)) {
     if (mediaEstimate.overSoftLimit) {
       return {
         tone: "warn",
@@ -3663,24 +4070,22 @@
     return quietImportHint();
   }
 
-  function updateIssueQueue(checks = null, gate = null) {
+  function updateIssueQueue(checks = null, gate = null, context = {}) {
     if (!els.issueQueueList) return;
     const resolvedChecks = checks || buildPreflightChecks();
-    const resolvedGate = gate || getImportGate(resolvedChecks);
-    const issues = buildIssueQueue(resolvedChecks, resolvedGate);
-    const blockers = issues.filter((issue) => issue.tone === "error").length;
-    const warnings = issues.filter((issue) => issue.tone === "warn").length;
-    els.issueQueueMeta.textContent = blockers
-      ? `${blockers} thing(s) to fix, ${warnings} warning(s)`
-      : warnings
-        ? `${warnings} warning(s), no blockers`
-        : "No active issues; continue with a real X import.";
-    els.issueQueueList.innerHTML = issues
-      .map((issue) => {
-        const action = issue.action
-          ? `<button class="secondary compact" type="button" data-issue-action="${shared.escapeHtml(issue.action)}">${shared.escapeHtml(issue.button)}</button>`
-          : `<span class="issue-state">${shared.escapeHtml(issue.state || "Ready")}</span>`;
-        return `
+    const byId = context.byId || indexPreflightChecks(resolvedChecks);
+    const resolvedGate = gate || getImportGate(resolvedChecks, { ...context, byId });
+    const issues = buildIssueQueue(resolvedChecks, resolvedGate, { ...context, byId });
+    let blockers = 0;
+    let warnings = 0;
+    let issueQueueHtml = "";
+    for (const issue of issues) {
+      if (issue.tone === "error") blockers += 1;
+      if (issue.tone === "warn") warnings += 1;
+      const action = issue.action
+        ? `<button class="secondary compact" type="button" data-issue-action="${shared.escapeHtml(issue.action)}">${shared.escapeHtml(issue.button)}</button>`
+        : `<span class="issue-state">${shared.escapeHtml(issue.state || "Ready")}</span>`;
+      issueQueueHtml += `
           <li data-tone="${shared.escapeHtml(issue.tone)}">
             <span class="issue-source">${shared.escapeHtml(issue.source)}</span>
             <div>
@@ -3690,31 +4095,38 @@
             ${action}
           </li>
         `;
-      })
-      .join("");
-    translateDynamicDom(els.issueQueueList.closest("section"));
+    }
+    setLocalizedTextIfChanged(
+      els.issueQueueMeta,
+      blockers
+        ? `${blockers} thing(s) to fix, ${warnings} warning(s)`
+        : warnings
+          ? `${warnings} warning(s), no blockers`
+          : "No active issues; continue with a real X import."
+    );
+    if (setSourceHtmlIfChanged(els.issueQueueList, issueQueueHtml)) {
+      translateDynamicDom(issueQueueSection);
+    }
   }
 
-  function buildIssueQueue(checks, gate) {
-    const byId = new Map(checks.map((check) => [check.id, check]));
+  function buildIssueQueue(checks, gate, context = {}) {
+    const byId = context.byId || indexPreflightChecks(checks);
     const draftOk = byId.get("draft")?.tone === "ok";
     const targetOk = byId.get("target")?.tone === "ok";
     const editorOk = byId.get("editor")?.tone === "ok";
-    const issues = checks
-      .filter((check) => {
-        if (check.tone !== "error" && check.tone !== "warn") return false;
-        if (check.id === "draft" || check.id === "target") return true;
-        if (check.id === "page-script") return targetOk;
-        if (check.id === "target-lock") return draftOk && targetOk;
-        if (check.id === "plan") return draftOk;
-        if (check.id === "assets") return draftOk && targetOk;
-        if (check.id === "editor") return targetOk;
-        if (check.id === "editor-content") return draftOk && targetOk && editorOk;
-        if (check.id === "bridge" || check.id === "uploads") return targetOk && (editorOk || Boolean(latestDiagnostics));
-        return true;
-      })
-      .map((check) => issueFromCheck(check));
-    const liveResult = buildLiveResultEvidence();
+    const issues = [];
+    for (const check of checks) {
+      if (check.tone !== "error" && check.tone !== "warn") continue;
+      if (check.id === "page-script" && !targetOk) continue;
+      if (check.id === "target-lock" && !(draftOk && targetOk)) continue;
+      if (check.id === "plan" && !draftOk) continue;
+      if (check.id === "assets" && !(draftOk && targetOk)) continue;
+      if (check.id === "editor" && !targetOk) continue;
+      if (check.id === "editor-content" && !(draftOk && targetOk && editorOk)) continue;
+      if ((check.id === "bridge" || check.id === "uploads") && !(targetOk && (editorOk || Boolean(latestDiagnostics)))) continue;
+      issues.push(issueFromCheck(check));
+    }
+    const liveResult = context.liveResult || buildLiveResultEvidence();
     const hasImportEvidence = Boolean(latestEvidence?.kind?.startsWith("import"));
 
     if (gate.ok && !hasImportEvidence) {
@@ -3791,35 +4203,44 @@
     };
   }
 
-  function updateExecutionTimeline(checks = null, gate = null) {
+  function updateExecutionTimeline(checks = null, gate = null, context = {}) {
     if (!els.timelineList) return;
-    const timeline = buildExecutionTimeline(checks || buildPreflightChecks(), gate);
-    const done = timeline.filter((step) => step.tone === "ok").length;
-    const blocked = timeline.filter((step) => step.tone === "error").length;
-    const ready = timeline.filter((step) => step.tone === "ready").length;
-    els.timelineMeta.textContent = blocked
+    const resolvedChecks = checks || buildPreflightChecks();
+    const byId = context.byId || indexPreflightChecks(resolvedChecks);
+    const timeline = buildExecutionTimeline(resolvedChecks, gate, { ...context, byId });
+    let done = 0;
+    let blocked = 0;
+    let ready = 0;
+    for (const step of timeline) {
+      if (step.tone === "ok") done += 1;
+      if (step.tone === "error") blocked += 1;
+      if (step.tone === "ready") ready += 1;
+    }
+    setLocalizedTextIfChanged(els.timelineMeta, blocked
       ? `${blocked} blocked stage(s), ${done} complete`
       : ready
         ? `${ready} stage(s) ready, ${done} complete`
         : done
           ? `${done}/${timeline.length} stage(s) complete`
-        : "Load Markdown to see the steps xPoster will run.";
+        : "Load Markdown to see the steps xPoster will run.");
     for (const step of timeline) {
-      const item = els.timelineList.querySelector(`[data-timeline-step="${step.id}"]`);
+      const item = timelineItems.get(step.id);
       if (!item) continue;
-      item.dataset.tone = step.tone;
-      item.querySelector("strong").textContent = step.label;
-      item.querySelector("div > span").textContent = step.detail;
-      item.querySelector("em").textContent = step.status;
+      syncStatusRow(item, {
+        tone: step.tone,
+        label: step.label,
+        detail: step.detail,
+        status: step.status
+      });
     }
-    translateDynamicDom(els.timelineList.closest("section"));
+    translateDynamicDom(timelineSection);
   }
 
-  function buildExecutionTimeline(checks, gate = null) {
-    const byId = new Map(checks.map((check) => [check.id, check]));
+  function buildExecutionTimeline(checks, gate = null, context = {}) {
+    const byId = context.byId || indexPreflightChecks(checks);
     const counts = latestCounts || shared.segmentCounts([]);
-    const plan = buildPreviewPlan();
-    const resolvedGate = gate || getImportGate(checks);
+    const plan = context.previewPlan || buildPreviewPlan();
+    const resolvedGate = gate || getImportGate(checks, { ...context, byId });
     const hasImportEvidence = Boolean(latestEvidence?.kind?.startsWith("import"));
     const importSucceeded = latestEvidence?.kind === "import";
     const importFailed = latestEvidence?.kind === "import-error";
@@ -3925,12 +4346,12 @@
     return "Idle";
   }
 
-  function updateLiveRunbook(checks = null, gate = null) {
+  function updateLiveRunbook(checks = null, gate = null, context = {}) {
     if (!els.liveRunbookList) return;
     const resolvedChecks = checks || buildPreflightChecks();
-    const byId = new Map(resolvedChecks.map((check) => [check.id, check]));
-    const resolvedGate = gate || getImportGate(resolvedChecks);
-    const liveResult = buildLiveResultEvidence();
+    const byId = context.byId || indexPreflightChecks(resolvedChecks);
+    const resolvedGate = gate || getImportGate(resolvedChecks, { ...context, byId });
+    const liveResult = context.liveResult || buildLiveResultEvidence();
     const hasDraft = byId.get("draft")?.tone === "ok";
     const hasQueue = queueModeActive();
     const targetReady = byId.get("target")?.tone === "ok";
@@ -3996,23 +4417,23 @@
       }
     ];
 
+    let ready = 0;
     for (const step of runbook) {
-      const item = els.liveRunbookList.querySelector(`[data-runbook-step="${step.id}"]`);
+      if (step.tone === "ok" || step.tone === "ready") ready += 1;
+      const item = liveRunbookItems.get(step.id);
       if (!item) continue;
-      item.dataset.tone = step.tone;
-      item.querySelector("div > span").textContent = step.detail;
-      const button = item.querySelector("button[data-runbook-action]");
+      syncStatusRow(item, { tone: step.tone, detail: step.detail });
+      const button = liveRunbookActionButtons.get(step.id);
       if (button) {
-        button.disabled =
+        setBooleanPropertyIfChanged(button, "disabled",
           (step.id === "diagnostics" && !targetReady) ||
-          (step.id === "import" && !resolvedGate.ok) ||
-          (step.id === "result" && !hasImportEvidence) ||
-          (step.id === "evidence" && !liveResult.complete);
+            (step.id === "import" && !resolvedGate.ok) ||
+            (step.id === "result" && !hasImportEvidence) ||
+            (step.id === "evidence" && !liveResult.complete));
       }
     }
-    const ready = runbook.filter((step) => step.tone === "ok" || step.tone === "ready").length;
-    els.liveRunbookMeta.textContent = `${ready}/${runbook.length} after-import steps ready.`;
-    translateDynamicDom(els.liveRunbookList.closest("section"));
+    setLocalizedTextIfChanged(els.liveRunbookMeta, `${ready}/${runbook.length} after-import steps ready.`);
+    translateDynamicDom(liveRunbookSection);
   }
 
   function buildPreflightChecks(context = {}) {
@@ -4025,14 +4446,20 @@
     const specialBlocks = (counts.code || 0) + (counts.divider || 0) + (counts.tweet || 0);
     const images = counts.image || 0;
     const tables = counts.table || 0;
-    const remoteImageList = markdowns ? remoteHttpImageSegmentsForMarkdowns(markdowns, importOptions) : parsed ? remoteHttpImageSegments(parsed) : [];
+    const remoteImageList = Array.isArray(context.parsedDrafts)
+      ? remoteHttpImageSegmentsForParsedDrafts(context.parsedDrafts)
+      : markdowns
+        ? remoteHttpImageSegmentsForMarkdowns(markdowns, importOptions)
+        : parsed
+          ? remoteHttpImageSegments(parsed)
+          : [];
     const remoteImages = remoteImageList.length;
-    const remoteOrigins = markdowns ? remoteImageOriginsForMarkdowns(markdowns, importOptions) : remoteImageOrigins(parsed);
+    const remoteOrigins = remoteImageOriginsFromSegments(remoteImageList);
     const hasQueue = Boolean(markdowns);
     const hasDraft = hasQueue || Boolean(parsed?.segments?.length);
     const targetMissingTone = hasDraft ? "warn" : "error";
     const hasParsedDraft = Boolean(parsed?.segments?.length);
-    const hasPlan = hasQueue || (hasParsedDraft && Boolean(shared.buildPastePlan(parsed.segments, previewImageMap(parsed), previewTableMap(parsed)).plan.length || parsed.segments.length));
+    const hasPlan = hasQueue || hasParsedDraft;
     const targetContext = buildTargetContextEvidence();
     const lockStatus = targetLockStatus(targetContext);
     const contentStatus = editorContentStatus(targetContext);
@@ -4223,6 +4650,11 @@
       fileName: item.op.file?.fileName || null,
       fallbackText: item.op.fallbackText || null
     }));
+    const operationCounts = { atomic: 0, images: 0 };
+    for (const item of operations) {
+      if (item.type === "atomic") operationCounts.atomic += 1;
+      if (item.type === "image") operationCounts.images += 1;
+    }
     return {
       htmlLength: plan.html.length,
       plainLength: plan.plain.length,
@@ -4230,8 +4662,8 @@
       operations,
       summary: {
         markers: operations.length,
-        atomic: operations.filter((item) => item.type === "atomic").length,
-        images: operations.filter((item) => item.type === "image").length,
+        atomic: operationCounts.atomic,
+        images: operationCounts.images,
         localImages: localImageReferences(parsed).length
       }
     };
@@ -4239,7 +4671,11 @@
 
   function buildEvidencePackage(reason = "manual") {
     const checks = buildPreflightChecks();
-    const gate = getImportGate(checks);
+    const byId = indexPreflightChecks(checks);
+    const evidenceContext = preflightEvidenceContext(checks, { byId });
+    const gate = getImportGate(checks, evidenceContext);
+    const draftLocalImages = latestParsed ? localImageReferences(latestParsed) : [];
+    const draftRemoteImages = latestParsed ? remoteHttpImageSegments(latestParsed) : [];
     const draft = latestParsed
       ? {
           title: latestParsed.title || null,
@@ -4249,18 +4685,13 @@
           titleSource: latestParsed.titleSource || null,
           counts: latestCounts,
           blocks: latestParsed.segments.length,
-          localImages: localImageReferences(latestParsed)
+          localImages: draftLocalImages
             .map((item) => ({
               source: item.source,
               role: item.role,
               absolute: shared.isAbsoluteLocalImageSource(item.source)
             })),
-          remoteImages: {
-            count: remoteHttpImageSegments(latestParsed).length,
-            origins: remoteImageOrigins(latestParsed),
-            access: remoteImageAccessStatus,
-            probe: remoteImageProbeStatus
-          },
+          remoteImages: remoteImageEvidenceFromSegments(draftRemoteImages),
           mediaUploadEstimate: mediaUploadEstimate(latestParsed)
         }
       : {
@@ -4272,12 +4703,7 @@
           counts: shared.segmentCounts([]),
           blocks: 0,
           localImages: [],
-          remoteImages: {
-            count: 0,
-            origins: [],
-            access: remoteImageAccessStatus,
-            probe: remoteImageProbeStatus
-          },
+          remoteImages: remoteImageEvidenceFromSegments(draftRemoteImages),
           mediaUploadEstimate: mediaUploadEstimate(null)
         };
 
@@ -4286,13 +4712,13 @@
       reason,
       capturedAt: new Date().toISOString(),
       draft,
-      importPlan: buildPreviewPlan(),
+      importPlan: evidenceContext.previewPlan,
       gate,
       checks,
-      liveResult: buildLiveResultEvidence(),
-      proofDeck: buildProofDeckEvidence(checks, gate),
-      completionAudit: buildCompletionAuditEvidence(checks, gate),
-      recovery: buildRecoveryState(checks, gate),
+      liveResult: evidenceContext.liveResult,
+      proofDeck: buildProofDeckEvidence(checks, gate, evidenceContext),
+      completionAudit: buildCompletionAuditEvidence(checks, gate, evidenceContext),
+      recovery: buildRecoveryState(checks, gate, evidenceContext),
       targetContext: buildTargetContextEvidence(),
       importLedger: buildImportLedger(latestParsed, latestCounts),
       liveProgress: buildLiveProgressEvidence(),
@@ -4303,7 +4729,8 @@
   }
 
   function localAssetWriteBlocker(checks = buildPreflightChecks(), context = {}) {
-    const assets = checks.find((check) => check.id === "assets");
+    const byId = context.byId || indexPreflightChecks(checks);
+    const assets = byId.get("assets");
     if (!assets || assets.tone === "ok") return null;
     const localImages = preflightLocalImageFolderStatus(context);
     if (!localImages.count) return null;
@@ -4338,7 +4765,7 @@
   }
 
   function getImportGate(checks, context = {}) {
-    const byId = new Map(checks.map((check) => [check.id, check]));
+    const byId = context.byId || indexPreflightChecks(checks);
     const counts = preflightSegmentCounts(context);
     const requiresBridge = (counts.code || 0) + (counts.divider || 0) + (counts.tweet || 0) > 0;
     const requiresUploads = (counts.image || 0) + (counts.table || 0) > 0;
@@ -4377,11 +4804,11 @@
     const item = document.createElement("li");
     const time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     const timeNode = document.createElement("time");
-    timeNode.textContent = time;
+    setTextContentIfChanged(timeNode, time);
     const messageNode = document.createElement("span");
-    messageNode.textContent = message;
+    setTextContentIfChanged(messageNode, message);
     item.append(timeNode, " ", messageNode);
-    if (els.activityPanel) els.activityPanel.hidden = false;
+    setBooleanPropertyIfChanged(els.activityPanel, "hidden", false);
     els.activityLog.prepend(item);
     while (els.activityLog.children.length > 8) els.activityLog.lastElementChild.remove();
     syncRecordPanel();
@@ -4396,21 +4823,12 @@
       dismissDraftDropStatus();
       return;
     }
-    els.draftDropStatus.dataset.tone = tone;
-    els.draftDropStatus.hidden = false;
-    els.draftDropStatus.setAttribute("role", "alert");
-    if (els.draftDropDismiss) els.draftDropDismiss.hidden = false;
-    const titleNode = els.draftDropStatus.querySelector("strong");
-    const detailNode = els.draftDropStatus.querySelector("span");
-    if (titleNode) {
-      titleNode.dataset.i18n = title;
-      titleNode.textContent = title;
-    }
-    if (detailNode) {
-      detailNode.dataset.i18n = detail;
-      detailNode.textContent = detail;
-    }
-    translateDynamicDom(els.draftDropStatus);
+    setDatasetValueIfChanged(els.draftDropStatus, "tone", tone);
+    setBooleanPropertyIfChanged(els.draftDropStatus, "hidden", false);
+    setAttributeValueIfChanged(els.draftDropStatus, "role", "alert");
+    setBooleanPropertyIfChanged(els.draftDropDismiss, "hidden", false);
+    setLocalizedTextIfChanged(draftDropStatusNodes.title, title);
+    setLocalizedTextIfChanged(draftDropStatusNodes.detail, detail);
   }
 
   function setCompactImportStatus(summary = null) {
@@ -4421,18 +4839,18 @@
     if (!els.draftDropStatus) return;
     window.clearTimeout(draftDropStatusTimer);
     draftDropStatusTimer = null;
-    els.draftDropStatus.hidden = true;
-    els.draftDropStatus.dataset.tone = "idle";
-    if (els.draftDropDismiss) els.draftDropDismiss.hidden = true;
+    setBooleanPropertyIfChanged(els.draftDropStatus, "hidden", true);
+    setDatasetValueIfChanged(els.draftDropStatus, "tone", "idle");
+    setBooleanPropertyIfChanged(els.draftDropDismiss, "hidden", true);
   }
 
   function acknowledgeDraftInput() {
     const target = els.draftEditorShell || els.markdown;
     if (!target) return;
-    target.classList.remove("draft-ack");
+    setClassPresenceIfChanged(target, "draft-ack", false);
     void target.offsetWidth;
-    target.classList.add("draft-ack");
-    window.setTimeout(() => target.classList.remove("draft-ack"), 520);
+    setClassPresenceIfChanged(target, "draft-ack", true);
+    window.setTimeout(() => setClassPresenceIfChanged(target, "draft-ack", false), 520);
   }
 
   function draftReadyDetail(length, counts = latestCounts) {
@@ -4467,7 +4885,7 @@
     if (reason === "import") {
       window.clearTimeout(runSummaryCollapseTimer);
       runSummaryCollapseTimer = null;
-      if (els.runSummary) els.runSummary.hidden = true;
+      setBooleanPropertyIfChanged(els.runSummary, "hidden", true);
       latestProgress.state = "running";
       latestProgress.level = "work";
       latestProgress.text = "Writing queued";
@@ -4613,9 +5031,9 @@
         : target.route === "articles"
           ? "warn"
           : "error";
-    els.targetContextPanel.dataset.tone = tone;
-    els.targetContextState.textContent = toneLabel(tone);
-    els.targetContextMeta.textContent = !target.available
+    setDatasetValueIfChanged(els.targetContextPanel, "tone", tone);
+    setLocalizedTextIfChanged(els.targetContextState, toneLabel(tone));
+    setLocalizedTextIfChanged(els.targetContextMeta, !target.available
       ? "No X Article is open yet."
       : lock.drifted
         ? lock.detail
@@ -4623,13 +5041,13 @@
         ? `${articleId ? `Article ${articleId} is open.` : "Article editor is open."} ${lock.locked ? "This article is confirmed." : "Click Check article before importing."}`
         : target.route === "articles"
           ? "X Articles is open; create or open a draft before importing."
-          : "Active X tab is not on the Articles composer.";
-    els.targetContextRoute.textContent = target.available
+          : "Active X tab is not on the Articles composer.");
+    setLocalizedTextIfChanged(els.targetContextRoute, target.available
       ? `${target.route === "editor" ? "Article editor" : target.route === "articles" ? "Articles home" : "Other X page"}${target.hasEditor ? " / editor visible" : ""}`
-      : "No X tab";
-    els.targetContextArticle.textContent = articleId || (status.isArticleRoute ? "New draft" : "None");
-    els.targetContextTitle.textContent = target.pageTitle || (target.available ? "Untitled X page" : "Unknown");
-    els.targetContextSample.textContent = target.editorSample || (target.hasEditor ? "Editor is empty." : "Open or create an X Article draft before import.");
+      : "No X tab");
+    setLocalizedTextIfChanged(els.targetContextArticle, articleId || (status.isArticleRoute ? "New draft" : "None"));
+    setLocalizedTextIfChanged(els.targetContextTitle, target.pageTitle || (target.available ? "Untitled X page" : "Unknown"));
+    setLocalizedTextIfChanged(els.targetContextSample, target.editorSample || (target.hasEditor ? "Editor is empty." : "Open or create an X Article draft before import."));
     translateDynamicDom(els.targetContextPanel);
   }
 
@@ -4788,6 +5206,7 @@
     const imageTotal = (images.ok || 0) + (images.fail || 0);
     const atomicTotal = (main.atomicOk || 0) + (main.atomicFail || 0);
     const elapsed = summary.elapsedMs ? `${(summary.elapsedMs / 1000).toFixed(1)}s` : "elapsed time unknown";
+    const pendingUploads = Number(main.imgPending || 0);
     if (uploadFailures.timeout) {
       return `${uploadFailures.timeout} image upload(s) timed out in X; ${images.ok || 0}/${imageTotal} media item(s), ${elapsed}.`;
     }
@@ -4799,7 +5218,11 @@
       if (bodyImages) parts.push(`${bodyImages} body image(s) kept as Markdown links`);
       if (tableImages) parts.push(`${tableImages} table image(s) kept as Markdown tables`);
       if (coverImages) parts.push(`${coverImages} cover image(s) not applied`);
+      if (pendingUploads) parts.push(`${pendingUploads} image(s) are in the editor while X finishes media IDs`);
       return `${parts.join("; ")}; ${main.atomicOk || 0}/${atomicTotal} embed/code item(s), ${elapsed}.`;
+    }
+    if (pendingUploads) {
+      return `${pendingUploads} image(s) are in the editor while X finishes media IDs; ${main.atomicOk || 0}/${atomicTotal} embed/code item(s), ${elapsed}.`;
     }
     return `${images.ok || 0}/${imageTotal} media item(s), ${main.atomicOk || 0}/${atomicTotal} embed/code item(s), ${elapsed}.`;
   }
@@ -4808,26 +5231,21 @@
     if (!els.liveProgress) return;
     const state = latestProgress || createLiveProgressState();
     const tone = state.level === "done" ? "done" : state.level || state.state || "idle";
-    els.liveProgress.dataset.tone = tone;
-    els.liveProgressState.textContent = state.state === "running"
+    setDatasetValueIfChanged(els.liveProgress, "tone", tone);
+    setLocalizedTextIfChanged(els.liveProgressState, state.state === "running"
       ? "Running"
       : state.state === "cancelled"
         ? "Stopped"
-        : toneLabel(tone);
-    els.liveProgressBar.style.width = `${Math.max(0, Math.min(100, Number(state.percent || 0)))}%`;
-    els.liveProgressTitle.textContent = state.text || "Nothing is running";
-    els.liveProgressDetail.textContent = state.detail || "Write progress appears here while xPoster fills X.";
+        : toneLabel(tone));
+    const percent = Math.max(0, Math.min(100, Number(state.percent || 0)));
+    setStyleValueIfChanged(els.liveProgressBar, "transform", `scaleX(${percent / 100})`);
+    setLocalizedTextIfChanged(els.liveProgressTitle, state.text || "Nothing is running");
+    setLocalizedTextIfChanged(els.liveProgressDetail, state.detail || "Write progress appears here while xPoster fills X.");
     if (els.cancelImport) {
       const cancellable = state.state === "running" || state.state === "parsed";
-      els.cancelImport.hidden = !cancellable;
-      els.cancelImport.disabled = importCancelRequested || !cancellable;
-      setLocalizedText(els.cancelImport, importCancelRequested ? "Stopping..." : "Stop");
-    }
-    const events = state.events?.length ? state.events : [];
-    if (!events.length) {
-      translateDynamicDom(els.liveProgress);
-      syncProgressiveSectionVisibility();
-      return;
+      setBooleanPropertyIfChanged(els.cancelImport, "hidden", !cancellable);
+      setBooleanPropertyIfChanged(els.cancelImport, "disabled", importCancelRequested || !cancellable);
+      setLocalizedTextIfChanged(els.cancelImport, importCancelRequested ? "Stopping..." : "Stop");
     }
     translateDynamicDom(els.liveProgress);
     syncProgressiveSectionVisibility();
@@ -4858,20 +5276,20 @@
     runSummaryCollapseTimer = window.setTimeout(() => {
       runSummaryCollapseTimer = null;
       if (!hasRunSummaryWarnings(latestProgress?.summary)) {
-        els.runSummary.hidden = true;
+        setBooleanPropertyIfChanged(els.runSummary, "hidden", true);
         syncRecordPanel();
       }
     }, 3600);
   }
 
-  function syncProgressiveSectionVisibility() {
-    const liveResult = buildLiveResultEvidence();
+  function syncProgressiveSectionVisibility(context = {}) {
+    const liveResult = context.liveResult || buildLiveResultEvidence();
     const progressVisible = isLiveProgressVisible();
     const hasAnyRecord = Boolean(latestEvidence || liveResult.checked > 0 || progressVisible);
-    if (els.liveProgress) els.liveProgress.hidden = !progressVisible;
-    if (els.verificationPanel) els.verificationPanel.hidden = true;
-    if (els.liveResultPanel) els.liveResultPanel.hidden = true;
-    if (els.evidenceDetails) els.evidenceDetails.hidden = !hasAnyRecord;
+    setBooleanPropertyIfChanged(els.liveProgress, "hidden", !progressVisible);
+    setBooleanPropertyIfChanged(els.verificationPanel, "hidden", true);
+    setBooleanPropertyIfChanged(els.liveResultPanel, "hidden", true);
+    setBooleanPropertyIfChanged(els.evidenceDetails, "hidden", !hasAnyRecord);
     syncRecordPanel();
   }
 
@@ -4882,10 +5300,10 @@
       if (node.parentElement !== els.recordsPanel) els.recordsPanel.appendChild(node);
     }
     for (const node of [els.verificationPanel, els.liveResultPanel]) {
-      if (node) node.hidden = true;
+      setBooleanPropertyIfChanged(node, "hidden", true);
     }
     const hasRecord = recordHistory.length || nodes.some((node) => !node.hidden);
-    if (els.recordsEmpty) els.recordsEmpty.hidden = hasRecord;
+    setBooleanPropertyIfChanged(els.recordsEmpty, "hidden", hasRecord);
     if (translate) translateDynamicDom(els.recordsPanel);
   }
 
@@ -4921,22 +5339,23 @@
     applySuccessFeedbackOptions(stored[STORAGE_SUCCESS_FEEDBACK] || successFeedbackOptions);
     applyStartupDraftState(stored);
     await restoreLanguage();
-    for (const input of getLiveResultItems()) {
-      input.checked = Boolean((stored[STORAGE_LIVE_RESULT] || {})[input.dataset.liveCheck]);
+    for (const { input } of getLiveResultItems()) {
+      setBooleanPropertyIfChanged(input, "checked", Boolean((stored[STORAGE_LIVE_RESULT] || {})[input.dataset.liveCheck]));
     }
     liveResultChecks = stored[STORAGE_LIVE_RESULT] || {};
     updateLiveResultMeta();
   }
 
-  function updateRecoveryPanel(checks = null, gate = null) {
+  function updateRecoveryPanel(checks = null, gate = null, context = {}) {
     if (!els.recoveryPanel) return;
     const resolvedChecks = checks || buildPreflightChecks();
-    const resolvedGate = gate || getImportGate(resolvedChecks);
-    const recovery = buildRecoveryState(resolvedChecks, resolvedGate);
-    els.recoveryPanel.dataset.tone = recovery.tone;
-    els.recoveryMeta.textContent = recovery.meta;
-    els.recoveryState.textContent = toneLabel(recovery.tone);
-    els.recoveryList.innerHTML = recovery.items
+    const byId = context.byId || indexPreflightChecks(resolvedChecks);
+    const resolvedGate = gate || getImportGate(resolvedChecks, { ...context, byId });
+    const recovery = buildRecoveryState(resolvedChecks, resolvedGate, { ...context, byId });
+    setDatasetValueIfChanged(els.recoveryPanel, "tone", recovery.tone);
+    setLocalizedTextIfChanged(els.recoveryMeta, recovery.meta);
+    setLocalizedTextIfChanged(els.recoveryState, toneLabel(recovery.tone));
+    const recoveryHtml = recovery.items
       .map((item, index) => {
         const button = item.action
           ? `<button class="secondary compact" type="button" data-recovery-action="${shared.escapeHtml(item.action)}">${shared.escapeHtml(item.button)}</button>`
@@ -4953,15 +5372,28 @@
         `;
       })
       .join("");
-    translateDynamicDom(els.recoveryPanel);
+    if (setSourceHtmlIfChanged(els.recoveryList, recoveryHtml)) translateDynamicDom(els.recoveryPanel);
   }
 
-  function buildRecoveryState(checks, gate) {
-    const byId = new Map(checks.map((check) => [check.id, check]));
+  function recoveryToneForItems(items = []) {
+    let hasWarn = false;
+    let hasReady = false;
+    for (const item of items) {
+      if (item.tone === "error") return "error";
+      if (item.tone === "warn") hasWarn = true;
+      else if (item.tone === "ready") hasReady = true;
+    }
+    if (hasWarn) return "warn";
+    if (hasReady) return "ready";
+    return "idle";
+  }
+
+  function buildRecoveryState(checks, gate, context = {}) {
+    const byId = context.byId || indexPreflightChecks(checks);
     const items = [];
     const importFailed = latestEvidence?.kind === "import-error" || latestProgress?.state === "error";
     const hasImportEvidence = Boolean(latestEvidence?.kind?.startsWith("import"));
-    const liveResult = buildLiveResultEvidence();
+    const liveResult = context.liveResult || buildLiveResultEvidence();
     const targetOk = byId.get("target")?.tone === "ok";
     const diagnosticsFailed = targetOk && ["bridge", "uploads", "editor"].some((id) => byId.get(id)?.tone === "error");
     const mediaFailed = latestEvidence?.result?.summary?.images?.fail || latestProgress?.summary?.images?.fail || 0;
@@ -5070,13 +5502,7 @@
       });
     }
 
-    const tone = items.some((item) => item.tone === "error")
-      ? "error"
-      : items.some((item) => item.tone === "warn")
-        ? "warn"
-        : items.some((item) => item.tone === "ready")
-          ? "ready"
-          : "idle";
+    const tone = recoveryToneForItems(items);
     const meta = importFailed
       ? "Failure recorded; save the record before retrying."
       : diagnosticsFailed
@@ -5107,27 +5533,30 @@
   }
 
   function showWorkspacePanel(target) {
-    const tabs = [...document.querySelectorAll(".tab")];
-    const activeTabIndex = tabs.findIndex((tab) => tab.dataset.tab === target);
-    const tabsContainer = document.querySelector(".tabs");
-    if (tabsContainer) {
-      tabsContainer.style.setProperty("--tab-count", String(Math.max(tabs.length, 1)));
-      tabsContainer.style.setProperty("--tab-index", String(Math.max(activeTabIndex, 0)));
-      tabsContainer.dataset.activeTab = activeTabIndex >= 0 ? "true" : "false";
+    let activeTabIndex = -1;
+    workspaceTabs.forEach((tab, index) => {
+      const isActive = tab.dataset.tab === target;
+      if (isActive) activeTabIndex = index;
+      setClassPresenceIfChanged(tab, "active", isActive);
+    });
+    if (workspaceTabsContainer) {
+      setStylePropertyIfChanged(workspaceTabsContainer, "--tab-count", Math.max(workspaceTabs.length, 1));
+      setStylePropertyIfChanged(workspaceTabsContainer, "--tab-index", Math.max(activeTabIndex, 0));
+      setDatasetValueIfChanged(workspaceTabsContainer, "activeTab", activeTabIndex >= 0 ? "true" : "false");
     }
-    tabs.forEach((tab, index) => {
-      tab.classList.toggle("active", index === activeTabIndex);
-    });
-    document.querySelectorAll(".panel").forEach((panel) => {
+    const targetPanels = [];
+    workspacePanels.forEach((panel) => {
       const isActive = panel.dataset.panel === target;
+      if (isActive) targetPanels.push(panel);
       if (isActive && !panel.classList.contains("active")) {
-        panel.style.animation = "none";
+        setStyleValueIfChanged(panel, "animation", "none");
         void panel.offsetWidth;
-        panel.style.animation = "";
+        setStyleValueIfChanged(panel, "animation", "");
       }
-      panel.classList.toggle("active", isActive);
+      setClassPresenceIfChanged(panel, "active", isActive);
     });
-    document.querySelectorAll(`.panel[data-panel="${CSS.escape(target)}"]`).forEach((panel) => translateDynamicDom(panel));
+    targetPanels.forEach((panel) => translateDynamicDom(panel, { syncEnvironment: false }));
+    syncLanguageEnvironment();
     if (target === "records") {
       void ensureRecordHistoryRestored({ render: true }).then(() => {
         syncRecordPanel({ translate: true });
@@ -5147,7 +5576,7 @@
   function openDetailsFor(element) {
     if (!element) return;
     const details = element.closest?.("details");
-    if (details) details.open = true;
+    setBooleanPropertyIfChanged(details, "open", true);
   }
 
   function jumpToSection(target) {
@@ -5223,21 +5652,21 @@
   }
 
   function setPageState(text, tone, action = "") {
-    const label = els.pageState.querySelector("span") || els.pageState;
-    setLocalizedText(label, text);
-    els.pageState.dataset.xposterSourceText = text;
-    els.pageState.dataset.pageAction = action;
-    els.pageState.className = `page-state ${tone || ""}`;
-    els.pageState.disabled = !action;
+    setLocalizedTextIfChanged(pageStateLabel, text);
+    setDatasetValueIfChanged(els.pageState, "xposterSourceText", text);
+    setDatasetValueIfChanged(els.pageState, "pageAction", action);
+    setClassNameIfChanged(els.pageState, `page-state ${tone || ""}`);
+    setBooleanPropertyIfChanged(els.pageState, "disabled", !action);
     const title = action === "openArticles" ? "Open X Articles entry" : text;
-    els.pageState.title = localizeText(title);
-    els.pageState.setAttribute("aria-label", localizeText(title));
+    const localizedTitle = localizeText(title);
+    setAttributeValueIfChanged(els.pageState, "title", localizedTitle);
+    setAttributeValueIfChanged(els.pageState, "aria-label", localizedTitle);
   }
 
   function setReadiness({ target, editor, vault }) {
-    els.targetReady.textContent = localizeText(target);
-    els.editorReady.textContent = localizeText(editor);
-    els.vaultReady.textContent = localizeText(vault);
+    setLocalizedTextIfChanged(els.targetReady, target);
+    setLocalizedTextIfChanged(els.editorReady, editor);
+    setLocalizedTextIfChanged(els.vaultReady, vault);
   }
 
   async function prepareSimpleWriteTarget(parsed, preflightContext = { parsed }) {
@@ -5314,7 +5743,9 @@
     }
     const preflightContext = { parsed, counts };
     updatePreflight();
-    const localAssetBlocker = localAssetWriteBlocker(buildPreflightChecks(preflightContext), preflightContext);
+    const checks = buildPreflightChecks(preflightContext);
+    const byId = indexPreflightChecks(checks);
+    const localAssetBlocker = localAssetWriteBlocker(checks, { ...preflightContext, byId });
     if (localAssetBlocker) {
       return handleLocalAssetWriteBlocker(localAssetBlocker, { queueItemId });
     }
@@ -5426,7 +5857,7 @@
   }
 
   async function importQueueItem(id) {
-    const item = draftQueue.find((entry) => entry.id === id);
+    const item = queueItemById(id);
     if (!item) return { ok: false, error: "Queued draft not found" };
     activeQueueItemId = item.id;
     activeDraftSourceFileName = normalizeSourceFileName(item.fileName);
@@ -5448,15 +5879,17 @@
     updateWriteButton();
     try {
       const markdowns = draftQueueMarkdowns();
-      const preflightContext = { markdowns };
-      updatePreflight();
+      const parsedDrafts = parsedDraftsForMarkdowns(markdowns, importOptions);
+      const preflightContext = { markdowns, parsedDrafts };
       const checks = buildPreflightChecks(preflightContext);
-      const localAssetBlocker = localAssetWriteBlocker(checks, preflightContext);
+      updatePreflight(checks);
+      const byId = indexPreflightChecks(checks);
+      const localAssetBlocker = localAssetWriteBlocker(checks, { ...preflightContext, byId });
       if (localAssetBlocker) {
         clearBatchWriteProgress();
         return await handleLocalAssetWriteBlocker(localAssetBlocker, { chooseWhenAvailable: true });
       }
-      const mediaBlocker = firstQueueMediaLimitBlocker(mediaUploadEstimateForMarkdowns(markdowns, importOptions));
+      const mediaBlocker = firstQueueMediaLimitBlocker(mediaUploadEstimateForParsedDrafts(parsedDrafts));
       if (mediaBlocker) {
         const message = mediaBlocker.detail;
         log(message);
@@ -5466,7 +5899,7 @@
         clearBatchWriteProgress();
         return { ok: false, error: message, mediaLimit: true };
       }
-      const origins = remoteImageOriginsForMarkdowns(draftQueue.map((item) => item.markdown), importOptions);
+      const origins = remoteImageOriginsFromSegments(remoteHttpImageSegmentsForParsedDrafts(parsedDrafts));
       if (origins.length) {
         const permission = await requestRemoteImageAccessForOrigins(origins, latestParsed);
         if (!permission.ok) {
@@ -5508,35 +5941,39 @@
     if (!summary) return;
     window.clearTimeout(runSummaryCollapseTimer);
     runSummaryCollapseTimer = null;
-    els.runSummary.hidden = false;
+    setBooleanPropertyIfChanged(els.runSummary, "hidden", false);
     const imageOk = summary.images?.ok || 0;
     const imageFail = summary.images?.fail || 0;
     const uploadFailures = mediaUploadFailureCounts(summary.main);
     const coverFailures = coverApplicationFailureCount(summary, uploadFailures);
+    const main = summary.main || {};
+    const pendingUploads = Number(main.imgPending || 0);
     const bodyImageWarnings = Number(summary.mediaWarnings?.images || 0) + uploadFailures.image;
     const tableImageWarnings = Number(summary.mediaWarnings?.tables || 0) + uploadFailures.table;
     const coverImageWarnings = Number(summary.mediaWarnings?.covers || 0) + uploadFailures.cover + coverFailures;
     const hasWarnings = hasRunSummaryWarnings(summary);
-    els.runSummary.dataset.tone = hasWarnings ? "warn" : "done";
+    setDatasetValueIfChanged(els.runSummary, "tone", hasWarnings ? "warn" : "done");
     if (els.summaryMessage) {
-      els.summaryMessage.dataset.tone = hasWarnings ? "warn" : "done";
-      els.summaryMessage.textContent = summarizeRunMessage(summary);
+      setDatasetValueIfChanged(els.summaryMessage, "tone", hasWarnings ? "warn" : "done");
+      setTextContentIfChanged(els.summaryMessage, summarizeRunMessage(summary));
     }
-    els.summaryImages.textContent = bodyImageWarnings || tableImageWarnings || coverImageWarnings
+    setTextContentIfChanged(els.summaryImages, bodyImageWarnings || tableImageWarnings || coverImageWarnings
       ? [
           imageOk ? `${imageOk} uploaded` : "",
+          pendingUploads ? `${pendingUploads} pending in X` : "",
           bodyImageWarnings ? `${bodyImageWarnings} body kept` : "",
           tableImageWarnings ? `${tableImageWarnings} table kept` : "",
           coverImageWarnings ? `${coverImageWarnings} cover missed` : ""
         ].filter(Boolean).join(", ")
       : imageOk
-        ? `Uploaded ${imageOk}`
-        : `${imageOk} / ${imageOk + imageFail}`;
-    const main = summary.main || {};
-    els.summaryBlocks.textContent = `${main.atomicOk || 0} / ${(main.atomicOk || 0) + (main.atomicFail || 0)}`;
-    els.summaryTitle.textContent = summarizeTitleResult(main.title);
-    els.summaryCover.textContent = summarizeCoverResult(main.cover);
-    els.summaryElapsed.textContent = `${((summary.elapsedMs || 0) / 1000).toFixed(1)}s`;
+        ? pendingUploads
+          ? `Uploaded ${imageOk}, ${pendingUploads} pending in X`
+          : `Uploaded ${imageOk}`
+        : `${imageOk} / ${imageOk + imageFail}`);
+    setTextContentIfChanged(els.summaryBlocks, `${main.atomicOk || 0} / ${(main.atomicOk || 0) + (main.atomicFail || 0)}`);
+    setTextContentIfChanged(els.summaryTitle, summarizeTitleResult(main.title));
+    setTextContentIfChanged(els.summaryCover, summarizeCoverResult(main.cover));
+    setTextContentIfChanged(els.summaryElapsed, `${((summary.elapsedMs || 0) / 1000).toFixed(1)}s`);
     translateDynamicDom(els.runSummary);
     scheduleRunSummaryCollapse(summary);
   }
@@ -5574,6 +6011,7 @@
     const keptImages = Number(summary.mediaWarnings?.images || 0) + uploadFailures.image;
     const keptTables = Number(summary.mediaWarnings?.tables || 0) + uploadFailures.table;
     const missedCovers = Number(summary.mediaWarnings?.covers || 0) + uploadFailures.cover + coverFailures;
+    const pendingUploads = Number(summary.main?.imgPending || 0);
     if (uploadFailures.timeout) {
       return `Article written${elapsed ? ` in ${elapsed}` : ""}. ${uploadFailures.timeout} image upload(s) timed out in X. Wait a moment, then write again or split the article if it has many images.`;
     }
@@ -5582,10 +6020,14 @@
       if (keptImages) parts.push(`${keptImages} body image(s) stayed as Markdown links`);
       if (keptTables) parts.push(`${keptTables} table image(s) stayed as Markdown tables`);
       if (missedCovers) parts.push(`${missedCovers} cover image(s) could not be applied`);
+      if (pendingUploads) parts.push(`${pendingUploads} image(s) are in the editor while X finishes media IDs`);
       const recovery = keptImages
-        ? " Replace private or expired URLs with public links if they must upload."
+        ? " Replace unreachable image URLs with public links, then write again if those images must upload."
         : "";
       return `Article written${elapsed ? ` in ${elapsed}` : ""}. ${parts.join("; ")}.${recovery}`;
+    }
+    if (pendingUploads) {
+      return `Article written${elapsed ? ` in ${elapsed}` : ""}. ${pendingUploads} image(s) are in the editor while X finishes media IDs.`;
     }
     if (uploaded) return "All web images uploaded.";
     return elapsed ? `Article written in ${elapsed}.` : "Article written.";
@@ -5610,42 +6052,54 @@
   }
 
   function getLiveResultItems() {
-    return Array.from(els.liveResultList.querySelectorAll("input[data-live-check]"));
+    return liveResultInputItems;
   }
 
   function buildLiveResultEvidence() {
-    const items = getLiveResultItems().map((input) => {
-      const item = input.closest("li");
-      return {
+    const items = [];
+    let checked = 0;
+    for (const { input, label, detail } of getLiveResultItems()) {
+      const item = {
         id: input.dataset.liveCheck,
         checked: Boolean(input.checked),
-        label: item?.querySelector("label")?.textContent?.trim() || input.dataset.liveCheck,
-        detail: item?.querySelector("span")?.textContent?.trim() || ""
+        label: label?.textContent?.trim() || input.dataset.liveCheck,
+        detail: detail?.textContent?.trim() || ""
       };
-    });
+      if (item.checked) checked += 1;
+      items.push(item);
+    }
     return {
-      checked: items.filter((item) => item.checked).length,
+      checked,
       total: items.length,
-      complete: items.length > 0 && items.every((item) => item.checked),
+      complete: items.length > 0 && checked === items.length,
       items
     };
   }
 
-  function updateLiveResultMeta() {
-    const result = buildLiveResultEvidence();
-    els.liveResultMeta.textContent = result.complete
-      ? "Article review complete; save the final records."
-      : `${result.checked}/${result.total} article review checks recorded.`;
-    updateLiveRunbook();
-    updateProofDeck();
-    updateCompletionAudit();
-    updateRecoveryPanel();
-    updateProgressiveSections();
+  function liveResultStorageState(liveResult) {
+    return Object.fromEntries((liveResult?.items || []).map((item) => [item.id, Boolean(item.checked)]));
+  }
+
+  function updateLiveResultMeta(liveResult = buildLiveResultEvidence()) {
+    setTextContentIfChanged(
+      els.liveResultMeta,
+      liveResult.complete ? "Article review complete; save the final records." : `${liveResult.checked}/${liveResult.total} article review checks recorded.`
+    );
+    const checks = buildPreflightChecks();
+    const byId = indexPreflightChecks(checks);
+    const liveResultContext = preflightEvidenceContext(checks, { byId, liveResult, includePreviewPlan: false });
+    const gate = getImportGate(checks, liveResultContext);
+    updateLiveRunbook(checks, gate, liveResultContext);
+    updateProofDeck(checks, gate, liveResultContext);
+    updateCompletionAudit(checks, gate, liveResultContext);
+    updateRecoveryPanel(checks, gate, liveResultContext);
+    updateProgressiveSections(liveResultContext);
   }
 
   function saveLiveResultChecks() {
-    liveResultChecks = Object.fromEntries(getLiveResultItems().map((input) => [input.dataset.liveCheck, Boolean(input.checked)]));
-    updateLiveResultMeta();
+    const liveResult = buildLiveResultEvidence();
+    liveResultChecks = liveResultStorageState(liveResult);
+    updateLiveResultMeta(liveResult);
     if (hasChromeApi()) chrome.storage.local.set({ [STORAGE_LIVE_RESULT]: liveResultChecks });
   }
 
@@ -5654,13 +6108,15 @@
       const stored = await startupStorage();
       liveResultChecks = stored[STORAGE_LIVE_RESULT] || {};
     }
-    for (const input of getLiveResultItems()) input.checked = Boolean(liveResultChecks[input.dataset.liveCheck]);
+    for (const { input } of getLiveResultItems()) {
+      setBooleanPropertyIfChanged(input, "checked", Boolean(liveResultChecks[input.dataset.liveCheck]));
+    }
     updateLiveResultMeta();
   }
 
   function resetLiveResultChecks() {
     liveResultChecks = {};
-    for (const input of getLiveResultItems()) input.checked = false;
+    for (const { input } of getLiveResultItems()) setBooleanPropertyIfChanged(input, "checked", false);
     updateLiveResultMeta();
     if (hasChromeApi()) chrome.storage.local.remove(STORAGE_LIVE_RESULT);
     log("Live result checklist reset.");
@@ -5777,13 +6233,13 @@
     const types = Array.from(dataTransfer.types || []);
     if (markdownTextFromTransfer(dataTransfer)) return true;
     if (types.includes("text/markdown")) return true;
-    const files = Array.from(dataTransfer.files || []);
-    if (files.length) return files.some(isMarkdownFile);
-    const items = Array.from(dataTransfer.items || []);
-    if (items.some(isLikelyMarkdownTransferItem)) return true;
-    if (items.some(isLikelyImageTransferItem)) return false;
+    const fileSummary = summarizeMarkdownTransferFiles(dataTransfer.files);
+    if (fileSummary.hasFiles) return Boolean(fileSummary.markdownFiles.length);
+    const itemSummary = summarizeMarkdownTransferItems(dataTransfer.items);
+    if (itemSummary.hasLikelyMarkdown) return true;
+    if (itemSummary.hasLikelyImage) return false;
     if (types.includes("text/plain")) return false;
-    return hasMarkdownFile(dataTransfer);
+    return itemSummary.hasLikelyMarkdown;
   }
 
   function markdownTextFromTransfer(dataTransfer) {
@@ -5792,10 +6248,19 @@
   }
 
   function hasMarkdownFile(dataTransfer) {
-    const files = Array.from(dataTransfer?.files || []);
-    if (files.some(isMarkdownFile)) return true;
-    const items = Array.from(dataTransfer?.items || []);
-    return items.some(isLikelyMarkdownTransferItem);
+    const fileSummary = summarizeMarkdownTransferFiles(dataTransfer?.files);
+    if (fileSummary.markdownFiles.length) return true;
+    return summarizeMarkdownTransferItems(dataTransfer?.items).hasLikelyMarkdown;
+  }
+
+  function summarizeMarkdownTransferItems(items) {
+    let hasLikelyMarkdown = false;
+    let hasLikelyImage = false;
+    for (const item of Array.from(items || [])) {
+      if (isLikelyMarkdownTransferItem(item)) hasLikelyMarkdown = true;
+      if (isLikelyImageTransferItem(item)) hasLikelyImage = true;
+    }
+    return { hasLikelyMarkdown, hasLikelyImage };
   }
 
   function isLikelyMarkdownTransferItem(item) {
@@ -5813,7 +6278,7 @@
     let dragActive = false;
     let dragCancelled = false;
     const dropPayloadFromTransfer = (dataTransfer) => {
-      const markdownFiles = markdownFilesFrom(dataTransfer?.files);
+      const { markdownFiles } = summarizeMarkdownTransferFiles(dataTransfer?.files);
       return {
         markdownFiles,
         text: markdownFiles.length ? "" : markdownTextFromTransfer(dataTransfer)
@@ -5823,12 +6288,12 @@
       if (dragCancelled) return;
       showWorkspacePanel("draft");
       dragActive = true;
-      els.draftPanel.classList.add("drag-active");
+      setClassPresenceIfChanged(els.draftPanel, "drag-active", true);
       setDraftDropStatus("Drop Markdown here", "Release to load it.", "ready");
     };
     const deactivateDropzone = () => {
       dragActive = false;
-      els.draftPanel.classList.remove("drag-active");
+      setClassPresenceIfChanged(els.draftPanel, "drag-active", false);
     };
     const restoreDropStatus = () => {
       setDraftDropStatus(
@@ -6000,13 +6465,13 @@
         }
       }
       if (changes[STORAGE_DRAFT_QUEUE]) {
-      const previousLength = draftQueue.length;
-      const previousIds = new Set(draftQueue.map((item) => item.id));
-      draftQueue = Array.isArray(changes[STORAGE_DRAFT_QUEUE].newValue)
-        ? changes[STORAGE_DRAFT_QUEUE].newValue.map(normalizeQueueItem).filter(Boolean).slice(0, MAX_DRAFT_QUEUE)
-        : [];
-      markDraftQueueMediaStale();
-      if (activeQueueItemId && !draftQueue.some((item) => item.id === activeQueueItemId)) activeQueueItemId = null;
+        const previousLength = draftQueue.length;
+        const previousIds = new Set(draftQueue.map((item) => item.id));
+        draftQueue = Array.isArray(changes[STORAGE_DRAFT_QUEUE].newValue)
+          ? changes[STORAGE_DRAFT_QUEUE].newValue.map(normalizeQueueItem).filter(Boolean).slice(0, MAX_DRAFT_QUEUE)
+          : [];
+        markDraftQueueMediaStale();
+        clearMissingActiveQueueItem();
         activeDraftSourceFileName = queueItemSourceFileName(activeQueueItemId);
         if (draftQueue.length > previousLength) {
           markQueueItemsEntered(draftQueue.filter((item) => !previousIds.has(item.id)));
@@ -6021,43 +6486,41 @@
   }
 
   async function restoreVaultState() {
-    setLocalizedText(els.vaultState, "Choose from an active X page");
-    setLocalizedText(els.vaultDetail, "Choose from an active X page when Markdown uses relative image paths.");
-    setLocalizedText(els.vaultSettingsText, "xPoster will ask when a Markdown draft uses local image paths.");
+    setLocalizedTextIfChanged(els.vaultState, "Choose from an active X page");
+    setLocalizedTextIfChanged(els.vaultDetail, "Choose from an active X page when Markdown uses relative image paths.");
+    setLocalizedTextIfChanged(els.vaultSettingsText, "xPoster will ask when a Markdown draft uses local image paths.");
     setVaultClearEnabled(false);
   }
 
   function updateVaultState(vault) {
     if (!vault) {
       setVaultClearEnabled(false);
-      translateDynamicDom(document.querySelector(".vault"));
+      translateDynamicDom(els.localImagesPanel);
       return;
     }
     if (!vault.configured) {
-      els.vaultState.textContent = "Not configured";
-      els.vaultDetail.textContent = "When a draft uses relative image paths, choose the folder that contains them.";
-      els.vaultSettingsText.textContent = "No folder connected. xPoster will ask when a draft needs local images.";
+      setLocalizedTextIfChanged(els.vaultState, "Not configured");
+      setLocalizedTextIfChanged(els.vaultDetail, "When a draft uses relative image paths, choose the folder that contains them.");
+      setLocalizedTextIfChanged(els.vaultSettingsText, "No folder connected. xPoster will ask when a draft needs local images.");
       setVaultClearEnabled(false);
-      translateDynamicDom(document.querySelector(".vault"));
       return;
     }
     const permissionText = vault.permission === "granted" ? "Read access granted" : "Permission needed";
     const savedText = vault.savedAt ? `Saved ${new Date(vault.savedAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}` : "Saved in this browser";
-    els.vaultState.textContent = `Selected: ${vault.name}`;
-    els.vaultDetail.textContent = `${permissionText}. ${savedText}.`;
-    els.vaultSettingsText.textContent = `${vault.name} - ${permissionText.toLowerCase()}.`;
+    setLocalizedTextIfChanged(els.vaultState, `Selected: ${vault.name}`);
+    setLocalizedTextIfChanged(els.vaultDetail, `${permissionText}. ${savedText}.`);
+    setLocalizedTextIfChanged(els.vaultSettingsText, `${vault.name} - ${permissionText.toLowerCase()}.`);
     setVaultClearEnabled(true);
-    translateDynamicDom(document.querySelector(".vault"));
   }
 
   function setVaultClearEnabled(enabled) {
-    if (els.clearVault) els.clearVault.disabled = !enabled;
-    if (els.clearVaultSettings) els.clearVaultSettings.disabled = !enabled;
+    setBooleanPropertyIfChanged(els.clearVault, "disabled", !enabled);
+    setBooleanPropertyIfChanged(els.clearVaultSettings, "disabled", !enabled);
   }
 
   async function runPreflight() {
-    els.runPreflight.disabled = true;
-    setLocalizedText(els.runPreflight, "Checking...");
+    setBooleanPropertyIfChanged(els.runPreflight, "disabled", true);
+    setLocalizedTextIfChanged(els.runPreflight, "Checking...");
     log("Publishing check started.");
     await refreshPageState();
     const response = await sendToActiveTab({ type: "xposter:diagnostics" });
@@ -6071,26 +6534,30 @@
           : localizeText("the open X Article")
       }));
     }
-    updatePreflight();
+    const checks = buildPreflightChecks();
+    updatePreflight(checks);
     captureEvidence("preflight", {
-      checks: buildPreflightChecks(),
+      checks,
       targetLock,
       pageStatus: latestPageStatus,
       diagnostics: latestDiagnostics
     });
-    const failing = buildPreflightChecks().filter((check) => check.tone === "error");
-    if (failing.length) log(`Publishing check found ${failing.length} blocker(s).`);
+    const blockerCount = countItemsByTone(checks, "error");
+    if (blockerCount) log(`Publishing check found ${blockerCount} blocker(s).`);
     else log("Publishing check passed without blockers.");
-    els.runPreflight.disabled = false;
-    setLocalizedText(els.runPreflight, "Check");
+    setBooleanPropertyIfChanged(els.runPreflight, "disabled", false);
+    setLocalizedTextIfChanged(els.runPreflight, "Check");
   }
 
   function captureEvidence(kind, payload) {
     const checks = buildPreflightChecks();
-    const gate = getImportGate(checks);
+    const byId = indexPreflightChecks(checks);
+    const evidenceContext = preflightEvidenceContext(checks, { byId });
+    const gate = getImportGate(checks, evidenceContext);
     const targetContext = payload?.targetContext || buildTargetContextEvidence();
     const markdown = draftText();
     const snapshot = markdownSnapshot(markdown);
+    const evidenceRemoteImages = latestParsed ? remoteHttpImageSegments(latestParsed) : [];
     latestEvidence = {
       id: newRecordId(kind.replace(/[^a-z0-9]+/gi, "-").toLowerCase() || "record"),
       kind,
@@ -6106,20 +6573,15 @@
         characters: snapshot.characters,
         counts: latestCounts,
         blocks: latestParsed?.segments?.length || 0,
-        remoteImages: {
-          count: remoteHttpImageSegments(latestParsed).length,
-          origins: remoteImageOrigins(latestParsed),
-          access: remoteImageAccessStatus,
-          probe: remoteImageProbeStatus
-        }
+        remoteImages: remoteImageEvidenceFromSegments(evidenceRemoteImages)
       },
-      importPlan: buildPreviewPlan(),
+      importPlan: evidenceContext.previewPlan,
       gate,
       checks,
-      liveResult: buildLiveResultEvidence(),
-      proofDeck: buildProofDeckEvidence(checks, gate),
-      completionAudit: buildCompletionAuditEvidence(checks, gate),
-      recovery: buildRecoveryState(checks, gate),
+      liveResult: evidenceContext.liveResult,
+      proofDeck: buildProofDeckEvidence(checks, gate, evidenceContext),
+      completionAudit: buildCompletionAuditEvidence(checks, gate, evidenceContext),
+      recovery: buildRecoveryState(checks, gate, evidenceContext),
       targetContext,
       importLedger: buildImportLedger(latestParsed, latestCounts),
       liveProgress: buildLiveProgressEvidence(),
@@ -6127,14 +6589,12 @@
     };
     addRecordHistoryEntry(latestEvidence);
     if (kind === "import" || kind === "import-error") activeDraftFinalized = true;
-    setEvidenceRecordMeta(kind);
-    els.evidenceText.textContent = JSON.stringify(latestEvidence, jsonSafeReplacer, 2);
-    els.copyEvidence.disabled = false;
+    syncEvidenceRecordOutput(kind, latestEvidence);
     updateProgressiveSections();
-    updateLiveRunbook(checks, gate);
-    updateProofDeck(checks, gate);
-    updateCompletionAudit(checks, gate);
-    updateRecoveryPanel(checks, gate);
+    updateLiveRunbook(checks, gate, evidenceContext);
+    updateProofDeck(checks, gate, evidenceContext);
+    updateCompletionAudit(checks, gate, evidenceContext);
+    updateRecoveryPanel(checks, gate, evidenceContext);
     updateTargetContextPanel();
     translateDynamicDom();
   }
@@ -6235,7 +6695,7 @@
       titleResult: mergeSummaryResult(summarizeTitleResult(main?.title), previous?.titleResult),
       coverResult: mergeSummaryResult(summarizeCoverResult(main?.cover), previous?.coverResult),
       elapsedMs: summary?.elapsedMs || previous?.elapsedMs || null,
-      blockers: Array.isArray(evidence.checks) ? evidence.checks.filter((check) => check.tone === "error").length : 0,
+      blockers: countItemsByTone(evidence.checks, "error"),
       remoteImages: evidence.draft?.remoteImages || previous?.remoteImages || null,
       evidence
     };
@@ -6412,14 +6872,29 @@
       .toLowerCase();
   }
 
-  function filteredRecordHistory() {
+  function cachedRecordSearchText(record) {
+    const cached = recordSearchTextCache.get(record);
+    if (cached?.language === currentLanguage) return cached.text;
+    const text = recordSearchText(record);
+    recordSearchTextCache.set(record, { language: currentLanguage, text });
+    return text;
+  }
+
+  function recordHistoryView() {
     const query = recordSearchQuery.trim().toLowerCase();
-    if (!query) return recordHistory;
     const terms = query.split(/\s+/).filter(Boolean);
-    return recordHistory.filter((record) => {
-      const haystack = recordSearchText(record);
-      return terms.every((term) => haystack.includes(term));
-    });
+    const visibleRecords = [];
+    let total = 0;
+    for (const record of recordHistory) {
+      if (!recordHasMarkdown(record)) continue;
+      total += 1;
+      if (terms.length) {
+        const haystack = cachedRecordSearchText(record);
+        if (!terms.every((term) => haystack.includes(term))) continue;
+      }
+      visibleRecords.push(record);
+    }
+    return { total, visibleRecords, isSearching: terms.length > 0 };
   }
 
   function recordActionText(evidence) {
@@ -6451,7 +6926,7 @@
       return evidence.result?.error || "Write failed. Open details before retrying.";
     }
     if (kind === "preflight") {
-      const blockers = Array.isArray(evidence.checks) ? evidence.checks.filter((check) => check.tone === "error").length : 0;
+      const blockers = countItemsByTone(evidence.checks, "error");
       return blockers ? `${blockers} blocker(s) found before writing.` : "X article is ready for writing.";
     }
     if (kind === "preflight-blocked" || kind.includes("blocked")) {
@@ -6480,7 +6955,7 @@
     if (evidence.kind === "import-error") return "Failed";
     if (evidence.kind === "preflight-blocked" || evidence.kind?.includes("blocked")) return "Blocked";
     if (evidence.kind === "preflight") {
-      const blockers = Array.isArray(evidence.checks) ? evidence.checks.filter((check) => check.tone === "error").length : 0;
+      const blockers = countItemsByTone(evidence.checks, "error");
       return blockers ? "Check found blockers" : "Checked";
     }
     if (evidence.kind?.includes("remote-image")) return "Image check";
@@ -6492,7 +6967,7 @@
     if (evidence.kind === "import") return "ok";
     if (evidence.kind === "import-error" || evidence.kind === "preflight-blocked" || evidence.kind?.includes("blocked")) return "error";
     if (evidence.kind?.includes("remote-image")) return evidence.kind.includes("check") && !evidence.kind.includes("blocked") ? "ok" : "warn";
-    const blockers = Array.isArray(evidence.checks) ? evidence.checks.filter((check) => check.tone === "error").length : 0;
+    const blockers = countItemsByTone(evidence.checks, "error");
     return blockers ? "warn" : "ok";
   }
 
@@ -6503,9 +6978,13 @@
 
   function syncLatestEvidenceRecord() {
     if (!latestEvidence) return;
-    setEvidenceRecordMeta(latestEvidence.kind, latestEvidence.capturedAt);
-    els.evidenceText.textContent = JSON.stringify(latestEvidence, jsonSafeReplacer, 2);
-    els.copyEvidence.disabled = false;
+    syncEvidenceRecordOutput(latestEvidence.kind, latestEvidence);
+  }
+
+  function syncEvidenceRecordOutput(kind, evidence) {
+    setEvidenceRecordMeta(kind, evidence?.capturedAt);
+    setTextContentIfChanged(els.evidenceText, JSON.stringify(evidence, jsonSafeReplacer, 2));
+    setBooleanPropertyIfChanged(els.copyEvidence, "disabled", false);
   }
 
   async function restoreRecordHistory({ render = true } = {}) {
@@ -6520,7 +6999,8 @@
       : [];
     const pending = pendingRecordHistoryEntries;
     pendingRecordHistoryEntries = [];
-    recordHistory = [...pending, ...storedHistory.filter((item) => !pending.some((pendingItem) => pendingItem.id === item.id))]
+    const pendingIds = new Set(pending.map((item) => item.id));
+    recordHistory = [...pending, ...storedHistory.filter((item) => !pendingIds.has(item.id))]
       .slice(0, MAX_RECORD_HISTORY);
     latestEvidence = recordHistory[0]?.evidence || latestEvidence;
     recordHistoryRestored = true;
@@ -6600,54 +7080,59 @@
     };
   }
 
+  function setRecordClearActionState(total) {
+    const hasRecoverableRecords = total > 0;
+    if (els.clearRecordHistory) {
+      setBooleanPropertyIfChanged(els.clearRecordHistory, "disabled", !hasRecoverableRecords);
+      setBooleanPropertyIfChanged(recordClearWrap, "hidden", !hasRecoverableRecords);
+    }
+    if (!hasRecoverableRecords) closeRecordClearConfirm();
+  }
+
+  function recordHistoryMetaText({ total, visibleTotal, isSearching }) {
+    if (!total) return localizeText("No drafts");
+    if (isSearching) return localizeInterpolated("{count} found", { count: visibleTotal });
+    return localizeInterpolated("{count} draft(s)", { count: total });
+  }
+
+  function recordSearchSummaryText({ total, visibleTotal, isSearching }) {
+    if (!total) return "Paste or load Markdown to save the first recoverable draft.";
+    if (isSearching) return localizeInterpolated("{count} found", { count: visibleTotal });
+    return "";
+  }
+
   function renderRecordHistory() {
     if (!els.recordHistoryList) return;
-    const recoverableRecords = recordHistory.filter(recordHasMarkdown);
-    const total = recoverableRecords.length;
-    const visibleRecords = filteredRecordHistory().filter(recordHasMarkdown);
+    const { total, visibleRecords, isSearching } = recordHistoryView();
     const visibleTotal = visibleRecords.length;
-    const isSearching = Boolean(recordSearchQuery.trim());
-    if (els.recordHistory) els.recordHistory.hidden = false;
-    if (els.recordHistoryMeta) {
-      els.recordHistoryMeta.textContent = total
-        ? isSearching
-          ? localizeInterpolated("{count} found", { count: visibleTotal })
-          : localizeInterpolated("{count} draft(s)", { count: total })
-        : localizeText("No drafts");
-    }
-    if (els.recordSearchInput && els.recordSearchInput.value !== recordSearchQuery) {
-      els.recordSearchInput.value = recordSearchQuery;
-    }
+    setBooleanPropertyIfChanged(els.recordHistory, "hidden", false);
+    const recordCounts = { total, visibleTotal, isSearching };
+    setTextContentIfChanged(els.recordHistoryMeta, recordHistoryMetaText(recordCounts));
+    setPropertyValueIfChanged(els.recordSearchInput, "value", recordSearchQuery);
     if (els.recordSearchSummary) {
-      const searchSummary = total
-      ? isSearching
-        ? localizeInterpolated("{count} found", { count: visibleTotal })
-        : ""
-      : "Paste or load Markdown to save the first recoverable draft.";
-      els.recordSearchSummary.dataset.i18n = searchSummary;
-      els.recordSearchSummary.textContent = searchSummary;
+      const searchSummary = recordSearchSummaryText(recordCounts);
+      setDatasetValueIfChanged(els.recordSearchSummary, "i18n", searchSummary);
+      setTextContentIfChanged(els.recordSearchSummary, searchSummary);
     }
-    if (els.clearRecordHistory) els.clearRecordHistory.disabled = recordHistory.length === 0;
-    if (!recordHistory.length) closeRecordClearConfirm();
+    setRecordClearActionState(total);
+    let recordHistoryHtml = "";
+    let translateRecordHistory = false;
     if (!total) {
-      syncRecordEditSheet();
-      els.recordHistoryList.innerHTML = `<li class="record-history-empty">Paste or load Markdown to save the first recoverable draft.</li>`;
-      syncRecordPanel();
-      return;
-    }
-    if (!visibleTotal) {
-      syncRecordEditSheet();
-      els.recordHistoryList.innerHTML = `
+      recordHistoryHtml = `<li class="record-history-empty">Paste or load Markdown to save the first recoverable draft.</li>`;
+    } else if (!visibleTotal) {
+      recordHistoryHtml = `
         <li class="record-history-empty">
           <strong>No records match this search.</strong>
           <span>Clear the search or try a title, file name, URL, or Markdown phrase.</span>
         </li>
       `;
-      syncRecordPanel();
-      return;
+    } else {
+      recordHistoryHtml = visibleRecords.map(renderRecordHistoryItem).join("");
+      translateRecordHistory = true;
     }
-    els.recordHistoryList.innerHTML = visibleRecords.map(renderRecordHistoryItem).join("");
-    translateDynamicDom(els.recordHistory);
+    if (setSourceHtmlIfChanged(els.recordHistoryList, recordHistoryHtml) && translateRecordHistory) {
+      translateDynamicDom(els.recordHistory);
+    }
     syncRecordEditSheet();
     syncRecordPanel();
   }
@@ -6686,6 +7171,9 @@
           <div class="record-actions">
             ${summaryHtml}
             <div class="record-action-icons" aria-label="${safe("Record actions")}">
+              <button class="record-icon-action record-delete-action" type="button" data-record-action="delete-record" data-record-id="${safe(record.id)}" title="${safe("Clear this record.")}" aria-label="${safe("Clear this record.")}">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.8 7h14.4"/><path d="M9.2 7V5.4c0-.6.4-1 1-1h3.6c.6 0 1 .4 1 1V7"/><path d="M7.4 10.2 8.1 19c.1.6.5 1 1.1 1h5.6c.6 0 1-.4 1.1-1l.7-8.8"/><path d="M10.4 11.6v5.4"/><path d="M13.6 11.6v5.4"/></svg>
+              </button>
               <button class="record-icon-action" type="button" data-record-action="copy-markdown" data-record-id="${safe(record.id)}" title="${safe("Copy this saved Markdown.")}" aria-label="${safe("Copy this saved Markdown.")}">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 7h10v13H8V7Zm2 2v9h6V9h-6ZM5 4h10v2H7v10H5V4Z"/></svg>
               </button>
@@ -6700,19 +7188,45 @@
     `;
   }
 
+  function setEmptyEvidenceRecord() {
+    latestEvidence = null;
+    setLocalizedTextIfChanged(els.evidenceMeta, "No technical record saved yet.");
+    setLocalizedTextIfChanged(els.evidenceText, "Run Check article or Write article to save a technical record.");
+    setBooleanPropertyIfChanged(els.copyEvidence, "disabled", true);
+  }
+
+  function refreshLatestEvidenceFromRecordHistory() {
+    latestEvidence = recordHistory[0]?.evidence || null;
+    if (latestEvidence) syncLatestEvidenceRecord();
+    else setEmptyEvidenceRecord();
+  }
+
+  function removeRecordHistoryItem(recordId) {
+    const index = recordHistory.findIndex((record) => record.id === recordId);
+    if (index < 0) return false;
+    const [removed] = recordHistory.splice(index, 1);
+    pendingRecordHistoryEntries = pendingRecordHistoryEntries.filter((record) => record.id !== recordId);
+    if (activeRecordEditorId === recordId) activeRecordEditorId = null;
+    const latestId = latestEvidence?.id || "";
+    const removedLatest = latestId && (latestId === removed?.id || latestId === removed?.evidence?.id);
+    if (removedLatest || !recordHistory.length) refreshLatestEvidenceFromRecordHistory();
+    persistRecordHistory();
+    renderRecordHistory();
+    updateProgressiveSections();
+    log("Record deleted.");
+    return true;
+  }
+
   async function clearRecordHistory() {
     closeRecordClearConfirm();
     recordHistory = [];
-    latestEvidence = null;
     activeDraftRecordId = null;
     activeDraftFingerprint = null;
     activeDraftFinalized = false;
     activeRecordEditorId = null;
     window.clearTimeout(draftInputHistoryTimer);
     if (hasChromeApi()) await chrome.storage.local.remove(STORAGE_RECORD_HISTORY).catch(() => {});
-    setLocalizedText(els.evidenceMeta, "No technical record saved yet.");
-    setLocalizedText(els.evidenceText, "Run Check article or Write article to save a technical record.");
-    els.copyEvidence.disabled = true;
+    setEmptyEvidenceRecord();
     renderRecordHistory();
     updateProgressiveSections();
     log("Records cleared.");
@@ -6720,15 +7234,15 @@
 
   function openRecordClearConfirm() {
     if (!els.recordClearConfirm || !els.clearRecordHistory || els.clearRecordHistory.disabled) return;
-    els.recordClearConfirm.hidden = false;
-    els.clearRecordHistory.setAttribute("aria-expanded", "true");
+    setBooleanPropertyIfChanged(els.recordClearConfirm, "hidden", false);
+    setAttributeValueIfChanged(els.clearRecordHistory, "aria-expanded", "true");
     translateDynamicDom(els.recordClearConfirm);
     window.setTimeout(() => els.confirmRecordClear?.focus?.(), 0);
   }
 
   function closeRecordClearConfirm() {
-    if (els.recordClearConfirm) els.recordClearConfirm.hidden = true;
-    if (els.clearRecordHistory) els.clearRecordHistory.setAttribute("aria-expanded", "false");
+    setBooleanPropertyIfChanged(els.recordClearConfirm, "hidden", true);
+    setAttributeValueIfChanged(els.clearRecordHistory, "aria-expanded", "false");
   }
 
   function toggleRecordClearConfirm() {
@@ -6825,7 +7339,7 @@
     const record = currentRecord(activeRecordEditorId);
     if (!record) {
       setMarkdownEditorOpen(false);
-      if (els.recordEditTextarea) els.recordEditTextarea.value = "";
+      setPropertyValueIfChanged(els.recordEditTextarea, "value", "");
       activeDraftEditor = null;
       return;
     }
@@ -6850,7 +7364,7 @@
   }
 
   function openQueueEditor(queueId) {
-    const item = draftQueue.find((entry) => entry.id === queueId);
+    const item = queueItemById(queueId);
     if (!item) return;
     configureMarkdownEditor({
       title: queueItemDisplayTitle(item) || localizeText("Queued Markdown"),
@@ -6867,13 +7381,13 @@
     activeDraftEditor = null;
     resetEditorHistory(els.recordEditTextarea);
     if (els.recordEditTextarea) {
-      els.recordEditTextarea.value = "";
-      els.recordEditTextarea.dataset.editorMode = "";
-      els.recordEditTextarea.dataset.recordId = "";
-      els.recordEditTextarea.dataset.queueId = "";
+      setPropertyValueIfChanged(els.recordEditTextarea, "value", "");
+      setDatasetValueIfChanged(els.recordEditTextarea, "editorMode", "");
+      setDatasetValueIfChanged(els.recordEditTextarea, "recordId", "");
+      setDatasetValueIfChanged(els.recordEditTextarea, "queueId", "");
     }
     updateRecordEditorMode("edit");
-    if (els.recordEditWriteButton) els.recordEditWriteButton.hidden = true;
+    setBooleanPropertyIfChanged(els.recordEditWriteButton, "hidden", true);
     setMarkdownEditorOpen(false);
   }
 
@@ -6938,7 +7452,11 @@
     }
     const action = button.dataset.recordAction;
     const recordId = button.dataset.recordId || activeRecordEditorId;
-    if (action === "restore") {
+    if (action === "delete-record") {
+      event.preventDefault();
+      event.stopPropagation();
+      removeRecordHistoryItem(recordId);
+    } else if (action === "restore") {
       restoreRecordMarkdown(recordId);
     } else if (action === "edit") {
       openRecordEditor(recordId);
@@ -7001,18 +7519,23 @@
     openRecordEditor(item.dataset.recordId);
   }
 
-  function buildProofDeckEvidence(checks = null, gate = null) {
+  function buildProofDeckEvidence(checks = null, gate = null, context = {}) {
     const resolvedChecks = checks || buildPreflightChecks();
-    const byId = new Map(resolvedChecks.map((check) => [check.id, check]));
-    const resolvedGate = gate || getImportGate(resolvedChecks);
-    const liveResult = buildLiveResultEvidence();
+    const byId = context.byId || indexPreflightChecks(resolvedChecks);
+    const resolvedGate = gate || getImportGate(resolvedChecks, { ...context, byId });
+    const liveResult = context.liveResult || buildLiveResultEvidence();
     const hasImportEvidence = Boolean(latestEvidence?.kind?.startsWith("import"));
     const targetReady = byId.get("target")?.tone === "ok";
-    const needsRemote = remoteHttpImageSegments(latestParsed).length > 0;
-    const hasDraftRecord = Boolean(recordHistory.find(recordHasMarkdown) || recordHasMarkdown(latestEvidence));
+    const needsRemote = typeof context.needsRemote === "boolean" ? context.needsRemote : remoteHttpImageSegments(latestParsed).length > 0;
+    const historyDraftRecord = recordHistory.find(recordHasMarkdown) || null;
+    const evidenceDraftRecord = !historyDraftRecord && recordHasMarkdown(latestEvidence)
+      ? normalizeRecordHistoryEntry(latestEvidence || {}, {})
+      : null;
+    const draftRecord = historyDraftRecord || evidenceDraftRecord;
+    const hasDraftRecord = Boolean(draftRecord);
     const importSucceeded = latestEvidence?.kind === "import";
     const importFailed = latestEvidence?.kind === "import-error";
-    const recordTitle = recordDisplayTitle(recordHistory.find(recordHasMarkdown) || normalizeRecordHistoryEntry(latestEvidence || {}, {}));
+    const recordTitle = draftRecord ? recordDisplayTitle(draftRecord) : "";
     const linkedArticle = latestEvidence?.targetContext?.articleId || latestPageStatus?.targetContext?.articleId || latestPageStatus?.articleId || "";
     const items = [
       {
@@ -7062,38 +7585,41 @@
               : "Fix the current blocker, then run Check article again."
       }
     ];
+    let ready = 0;
+    for (const item of items) {
+      if (item.tone === "ok" || item.tone === "ready") ready += 1;
+    }
     return {
       extensionPath: EXTENSION_PATH,
       loadedUnpacked: hasChromeApi(),
       complete: importSucceeded && liveResult.complete,
+      ready,
       items
     };
   }
 
-  function updateProofDeck(checks = null, gate = null) {
+  function updateProofDeck(checks = null, gate = null, context = {}) {
     if (!els.proofDeckList) return;
-    const proof = buildProofDeckEvidence(checks, gate);
-    const ready = proof.items.filter((item) => item.tone === "ok" || item.tone === "ready").length;
-    els.proofDeckMeta.textContent = proof.complete
+    const proof = buildProofDeckEvidence(checks, gate, context);
+    setLocalizedTextIfChanged(els.proofDeckMeta, proof.complete
       ? "Article review is recorded. Keep this summary or save the full record."
-      : `${ready}/${proof.items.length} publish steps ready.`;
-    if (els.extensionPath) els.extensionPath.textContent = proof.extensionPath;
+      : `${proof.ready}/${proof.items.length} publish steps ready.`);
+    setTextContentIfChanged(els.extensionPath, proof.extensionPath);
     for (const item of proof.items) {
-      const row = els.proofDeckList.querySelector(`[data-proof="${item.id}"]`);
+      const row = proofDeckItems.get(item.id);
       if (!row) continue;
-      row.dataset.tone = item.tone;
-      row.querySelector("strong").textContent = item.label;
-      row.querySelector("span").textContent = item.detail;
+      syncStatusRow(row, { tone: item.tone, label: item.label, detail: item.detail });
     }
-    translateDynamicDom(els.proofDeckList.closest("section"));
+    translateDynamicDom(proofDeckSection);
   }
 
-  function buildCompletionAuditEvidence(checks = null, gate = null) {
+  function buildCompletionAuditEvidence(checks = null, gate = null, context = {}) {
     const resolvedChecks = checks || buildPreflightChecks();
-    const byId = new Map(resolvedChecks.map((check) => [check.id, check]));
-    const resolvedGate = gate || getImportGate(resolvedChecks);
-    const liveResult = buildLiveResultEvidence();
-    const proof = buildProofDeckEvidence(resolvedChecks, resolvedGate);
+    const byId = context.byId || indexPreflightChecks(resolvedChecks);
+    const resolvedGate = gate || getImportGate(resolvedChecks, { ...context, byId });
+    const liveResult = context.liveResult || buildLiveResultEvidence();
+    const needsRemote = typeof context.needsRemote === "boolean" ? context.needsRemote : remoteHttpImageSegments(latestParsed).length > 0;
+    const proof = buildProofDeckEvidence(resolvedChecks, resolvedGate, { ...context, byId, liveResult, needsRemote });
     const hasImportEvidence = Boolean(latestEvidence?.kind?.startsWith("import"));
     const importSucceeded = latestEvidence?.kind === "import";
     const importFailed = latestEvidence?.kind === "import-error";
@@ -7102,7 +7628,6 @@
     const uploadsReady = byId.get("uploads")?.tone === "ok";
     const targetReady = byId.get("target")?.tone === "ok";
     const draftReady = byId.get("draft")?.tone === "ok";
-    const needsRemote = remoteHttpImageSegments(latestParsed).length > 0;
     const packageReady = proof.complete || (liveResult.complete && hasImportEvidence);
 
     const items = [
@@ -7188,8 +7713,12 @@
       }
     ];
 
-    const proven = items.filter((item) => item.tone === "ok" || item.tone === "ready").length;
-    const blocked = items.filter((item) => item.tone === "error").length;
+    let proven = 0;
+    let blocked = 0;
+    for (const item of items) {
+      if (item.tone === "ok" || item.tone === "ready") proven += 1;
+      if (item.tone === "error") blocked += 1;
+    }
     const pending = items.length - proven - blocked;
     return {
       complete: proven === items.length,
@@ -7201,22 +7730,20 @@
     };
   }
 
-  function updateCompletionAudit(checks = null, gate = null) {
+  function updateCompletionAudit(checks = null, gate = null, context = {}) {
     if (!els.completionAuditList) return;
-    const audit = buildCompletionAuditEvidence(checks, gate);
-    els.completionAuditMeta.textContent = audit.complete
+    const audit = buildCompletionAuditEvidence(checks, gate, context);
+    setLocalizedTextIfChanged(els.completionAuditMeta, audit.complete
       ? "All completion records are ready."
       : audit.blocked
         ? `${audit.blocked} thing(s) to fix, ${audit.proven}/${audit.total} ready`
-        : `${audit.pending} item(s) waiting, ${audit.proven}/${audit.total} ready`;
+        : `${audit.pending} item(s) waiting, ${audit.proven}/${audit.total} ready`);
     for (const item of audit.items) {
-      const row = els.completionAuditList.querySelector(`[data-audit="${item.id}"]`);
+      const row = completionAuditItems.get(item.id);
       if (!row) continue;
-      row.dataset.tone = item.tone;
-      row.querySelector("strong").textContent = item.label;
-      row.querySelector("span").textContent = item.detail;
+      syncStatusRow(row, { tone: item.tone, label: item.label, detail: item.detail });
     }
-    translateDynamicDom(els.completionAuditList.closest("section"));
+    translateDynamicDom(completionAuditSection);
   }
 
   function jsonSafeReplacer(key, value) {
@@ -7240,8 +7767,8 @@
   async function copyEvidencePackage() {
     const pack = buildEvidencePackage("copy");
     const text = JSON.stringify(pack, jsonSafeReplacer, 2);
-    setLocalizedText(els.evidenceMeta, "Record package generated");
-    els.evidenceText.textContent = text;
+    setLocalizedTextIfChanged(els.evidenceMeta, "Record package generated");
+    setTextContentIfChanged(els.evidenceText, text);
     try {
       await navigator.clipboard.writeText(text);
       log("Record package copied.");
@@ -7281,8 +7808,8 @@
       await navigator.clipboard.writeText(text);
       log("Publish summary copied.");
     } catch {
-      setLocalizedText(els.evidenceMeta, "Publish summary generated");
-      els.evidenceText.textContent = text;
+      setLocalizedTextIfChanged(els.evidenceMeta, "Publish summary generated");
+      setTextContentIfChanged(els.evidenceText, text);
       log("Publish summary is ready in the panel.");
     }
   }
@@ -7492,11 +8019,11 @@
     if (!button) return;
     await runRunbookAction(button.dataset.recoveryAction);
   });
-  getLiveResultItems().forEach((input) => input.addEventListener("change", saveLiveResultChecks));
+  getLiveResultItems().forEach(({ input }) => input.addEventListener("change", saveLiveResultChecks));
   paintStartupShell();
   installDraftStorageSync();
   installDraftDropTray();
-  document.querySelectorAll(".tab").forEach((tab) => {
+  workspaceTabs.forEach((tab) => {
     tab.addEventListener("click", () => {
       showWorkspacePanel(tab.dataset.tab);
     });

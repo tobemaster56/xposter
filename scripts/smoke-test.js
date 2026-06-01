@@ -82,6 +82,8 @@ for (const resourceGroup of manifest.web_accessible_resources || []) {
 }
 
 const shared = require(path.join(root, "src/shared.js"));
+const localImageCandidatePaths = (source, rootNames) =>
+  shared.localImagePathCandidates(source, rootNames).map((candidate) => candidate.join("/"));
 const fixture = readText("fixtures/live-x-smoke.md");
 const parsed = shared.parseMarkdown(fixture);
 const counts = shared.segmentCounts(parsed.segments);
@@ -149,6 +151,8 @@ const sidepanelHtml = readText("sidepanel.html");
 const diagnosticsHtml = readText("diagnostics.html");
 const sidepanelCss = readText("sidepanel.css");
 const sharedText = readText("src/shared.js");
+const booleanHelperNonBooleanUse = /setBooleanPropertyIfChanged\([^;\n]+,\s*"(?:value|tabIndex)"/;
+assert.ok(!booleanHelperNonBooleanUse.test(sidepanelText), "boolean property helper should not write value or tabIndex");
 const diagnosticsHtmlIncludesSharedFirst = () =>
   /src="src\/shared\.js"[\s\S]*src="src\/i18n\.js"[\s\S]*src="diagnostics\.js"/.test(diagnosticsHtml);
 const statusHelperStart = contentScriptText.indexOf("  function normalizeText");
@@ -157,8 +161,10 @@ const contentMediaHelperStart = contentScriptText.indexOf("  function articleMed
 const contentMediaHelperEnd = contentScriptText.indexOf("  function mediaLimitText");
 const sidepanelMediaHelperStart = sidepanelText.indexOf("  function mediaUploadEstimate");
 const sidepanelMediaHelperEnd = sidepanelText.indexOf("  function mediaNoteText");
-const mainMediaHelperStart = mainWorldText.indexOf("  function mediaIdFromEntityData");
+const mainMediaHelperStart = mainWorldText.indexOf("  function normalizeMediaIdValue");
 const mainMediaHelperEnd = mainWorldText.indexOf("  function placeSelectionAtMarker");
+const mainMarkerHelperStart = mainWorldText.indexOf("  function findMarkerLocation");
+const mainMarkerHelperEnd = mainWorldText.indexOf("  function kickRender");
 const statusSandbox = {
   document: { body: {}, documentElement: {} },
   getComputedStyle: () => ({ backgroundColor: "rgb(18, 26, 34)" }),
@@ -172,6 +178,7 @@ const mediaSandbox = {
   overParsed: mediaOverLimitParsed
 };
 const mainMediaSandbox = {};
+const mainMarkerSandbox = {};
 
 assert.ok(statusHelperStart >= 0 && statusHelperEnd > statusHelperStart, "status helper functions should be present");
 assert.ok(
@@ -184,6 +191,10 @@ assert.ok(
 assert.ok(
   mainMediaHelperStart >= 0 && mainMediaHelperEnd > mainMediaHelperStart,
   "main-world media upload helper functions should be present"
+);
+assert.ok(
+  mainMarkerHelperStart >= 0 && mainMarkerHelperEnd > mainMarkerHelperStart,
+  "main-world marker cleanup and relocation helper functions should be present"
 );
 vm.runInNewContext(
   `const state = { language: "zh" };
@@ -239,8 +250,140 @@ vm.runInNewContext(
    this.pendingUpload = findNewMediaUpload(fakeContentState({ mediaItems: [{}] }), new Set());
    this.completeUpload = findNewMediaUpload(fakeContentState({ mediaItems: [{ mediaId: "1234567890" }] }), new Set());
    this.snakeCaseUpload = findNewMediaUpload(fakeContentState({ media_items: [{ media_id: "0987654321" }] }), new Set());
+   this.nestedMediaKeyUpload = findNewMediaUpload(fakeContentState({ uploadResult: { media_key: "3_1122334455" } }), new Set());
+   this.restIdUpload = findNewMediaUpload(fakeContentState({ result: { rest_id: "9988776655" } }), new Set());
    this.existingUpload = findNewMediaUpload(fakeContentState({ mediaItems: [{ mediaId: "1234567890" }] }), new Set(["entity-1"]));`,
   mainMediaSandbox
+);
+vm.runInNewContext(
+  `${mainWorldText.slice(mainMarkerHelperStart, mainMarkerHelperEnd)}
+   class FakeCharacter {
+     set() { return this; }
+     getEntity() { return this.entity || null; }
+     static create() { return new FakeCharacter(); }
+   }
+   function fakeCharacterList(entityKey = null) {
+     const character = new FakeCharacter();
+     character.entity = entityKey;
+     return {
+       get: () => character,
+       clear: () => ({ concat: (items) => items }),
+       first: () => character
+     };
+   }
+   function fakeBlock(key, type, text, entityKey = null) {
+     return {
+       key,
+       type,
+       text,
+       entityKey,
+       getKey: () => key,
+       getType: () => type,
+       getText: () => text,
+       getCharacterList: () => fakeCharacterList(entityKey),
+       findEntityRanges: (filter, callback) => {
+         const character = fakeCharacterList(entityKey).get(0);
+         if (entityKey && filter(character)) callback(0);
+       },
+       merge: (data) => fakeBlock(data.key || key, data.type || type, Object.hasOwn(data, "text") ? data.text : text, entityKey)
+     };
+   }
+   function fakeBlockMap(entries) {
+     const pairs = entries.slice();
+     return {
+       constructor: () => fakeBlockMap([]),
+       forEach: (callback) => pairs.forEach(([key, block]) => callback(block, key)),
+       get: (key) => pairs.find(([candidate]) => candidate === key)?.[1] || null,
+       has: (key) => pairs.some(([candidate]) => candidate === key),
+       set: (key, block) => {
+         const foundIndex = pairs.findIndex(([candidate]) => candidate === key);
+         const next = pairs.slice();
+         if (foundIndex >= 0) next[foundIndex] = [key, block];
+         else next.push([key, block]);
+         return fakeBlockMap(next);
+       },
+       delete: (key) => fakeBlockMap(pairs.filter(([candidate]) => candidate !== key)),
+       last: () => pairs[pairs.length - 1]?.[1] || null,
+       keys: () => pairs.map(([key]) => key),
+       texts: () => Object.fromEntries(pairs.map(([key, block]) => [key, block.getText()]))
+     };
+   }
+   class FakeSelectionState {
+     static createEmpty(key) { return { key }; }
+   }
+   class FakeEditorState {
+     constructor(content) {
+       this.content = content;
+       this.selection = new FakeSelectionState();
+     }
+     getCurrentContent() { return this.content; }
+     getSelection() { return this.selection; }
+     static push(editorState, content) { return new FakeEditorState(content); }
+     static moveSelectionToEnd(editorState) { return editorState; }
+     static forceSelection(editorState) { return editorState; }
+   }
+   function fakeContentState(blockMap) {
+     return {
+       blockMap,
+       getBlockMap: () => blockMap,
+       getEntity: () => ({ getType: () => "MEDIA", getData: () => ({ mediaItems: [{ mediaId: "123" }] }) }),
+       set: (key, value) => key === "blockMap" ? fakeContentState(value) : fakeContentState(blockMap)
+     };
+   }
+   function fakeDraft(entries) {
+     const draft = {
+       props: {
+         editorState: new FakeEditorState(fakeContentState(fakeBlockMap(entries))),
+         onChange: (editorState) => {
+           draft.props.editorState = editorState;
+         }
+       }
+     };
+     return draft;
+   }
+   const embeddedMarker = "__XPOSTER_newaa_IMAGE_1__";
+   const markerContent = fakeContentState(fakeBlockMap([
+     ["a", fakeBlock("a", "unstyled", "Intro " + embeddedMarker + " outro")]
+   ]));
+   this.embeddedLocation = findMarkerLocation(markerContent, embeddedMarker);
+   const cleanupDraft = fakeDraft([
+     ["a", fakeBlock("a", "unstyled", "Before __XPOSTER_crnnj_IMAGE_1__ after")],
+     ["b", fakeBlock("b", "unstyled", "__XPOSTER_crnnj_IMAGE_2__")],
+     ["c", fakeBlock("c", "unstyled", "Keep")]
+   ]);
+   this.cleanedCount = cleanupMarkers(cleanupDraft, "__XPOSTER_newaa_");
+   const cleanedMap = cleanupDraft.props.editorState.getCurrentContent().getBlockMap();
+   this.cleanedKeys = cleanedMap.keys();
+   this.cleanedTexts = cleanedMap.texts();
+   const exactRelocateDraft = fakeDraft([
+     ["p1", fakeBlock("p1", "unstyled", "Intro")],
+     ["marker", fakeBlock("marker", "unstyled", embeddedMarker)],
+     ["p2", fakeBlock("p2", "unstyled", "Outro")],
+     ["img", fakeBlock("img", "atomic", " ", "entity-img")]
+   ]);
+   this.exactRelocateResult = relocateImages(exactRelocateDraft, [{
+     marker: embeddedMarker,
+     markerBlock: "marker",
+     markerExact: true,
+     entityKey: "entity-img"
+   }], new Set());
+   this.exactRelocateKeys = exactRelocateDraft.props.editorState.getCurrentContent().getBlockMap().keys();
+   const embeddedRelocateDraft = fakeDraft([
+     ["p1", fakeBlock("p1", "unstyled", "Intro")],
+     ["marker", fakeBlock("marker", "unstyled", "Text before " + embeddedMarker + " text after")],
+     ["p2", fakeBlock("p2", "unstyled", "Outro")],
+     ["img", fakeBlock("img", "atomic", " ", "entity-img")]
+   ]);
+   this.embeddedRelocateResult = relocateImages(embeddedRelocateDraft, [{
+     marker: embeddedMarker,
+     markerBlock: "marker",
+     markerExact: false,
+     entityKey: "entity-img"
+   }], new Set());
+   const embeddedRelocateMap = embeddedRelocateDraft.props.editorState.getCurrentContent().getBlockMap();
+   this.embeddedRelocateKeys = embeddedRelocateMap.keys();
+   this.embeddedRelocateTexts = embeddedRelocateMap.texts();`,
+  mainMarkerSandbox
 );
 
 assert.equal(parsed.title, "xPoster live smoke test", "frontmatter title should parse");
@@ -288,6 +431,26 @@ assert.equal(shared.isRemoteHttpImageSource("http://169.254.169.254/meta.png"), 
 assert.equal(shared.isRemoteHttpImageSource("http://224.0.0.1/a.png"), false, "multicast or reserved image URLs should not be downloaded");
 assert.equal(shared.isRemoteHttpImageSource("http://[::ffff:127.0.0.1]/a.png"), false, "IPv4-mapped loopback image URLs should not be downloaded");
 assert.equal(shared.isRemoteHttpImageSource("http://[::ffff:8.8.8.8]/a.png"), true, "public IPv4-mapped image URLs should remain valid");
+assert.deepEqual(
+  localImageCandidatePaths("./images/photo.png", "images"),
+  ["images/photo.png", "photo.png"],
+  "local image lookup should also try paths relative to a selected folder with the same name as the Markdown directory"
+);
+assert.deepEqual(
+  localImageCandidatePaths("./assets/images/photo.png", "images"),
+  ["assets/images/photo.png", "photo.png"],
+  "local image lookup should also handle dragging a nested image folder named in the Markdown path"
+);
+assert.deepEqual(
+  localImageCandidatePaths("./images/photo.png?size=large#cover", "assets"),
+  ["images/photo.png"],
+  "local image lookup should keep the original relative path when the selected folder name does not match"
+);
+assert.deepEqual(
+  localImageCandidatePaths("../photo.png", "images"),
+  [],
+  "local image lookup should not allow paths that escape the selected folder"
+);
 assert.equal(shared.parseDataUri("data:text/html;base64,PGgxPk5vdCBhbiBpbWFnZTwvaDE+").ok, false, "data URI images should reject non-image MIME types");
 assert.equal(shared.parseDataUri(`data:image/png;base64,${"A".repeat(24 * 1024 * 1024)}`).ok, false, "oversized data URI images should be rejected");
 assert.ok(
@@ -432,6 +595,14 @@ assert.ok(
     "Release in the bottom bar to write this Markdown here.",
     "xPoster page drop target",
     "function setDropHintProcessing",
+    "setDatasetValueIfChanged(hint, \"intent\", intent)",
+    "setDatasetValueIfChanged(hint, \"state\", \"ready\")",
+    "setDatasetValueIfChanged(hint, \"state\", \"processing\")",
+    "setAttributeValueIfChanged(hint, \"aria-label\", translateContentText(\"xPoster page drop target\"))",
+    "setTextContentIfChanged(title, translateContentText(copy.title))",
+    "setTextContentIfChanged(detail, translateContentText(copy.detail))",
+    "setTextContentIfChanged(status, translateContentText(dropHintStatusLabel(mode, intent)))",
+    "setStylePropertyIfChanged(hint, \"--xposter-drop-surface-left\"",
     "updateVisibleDropHintCopy",
     'translateContentText("xPoster page drop target")',
     "function isDropEventOverSurface(event, intent",
@@ -446,7 +617,19 @@ assert.ok(
       "__xposter_drop_text_focus",
       "__xposter_drop_rail",
       "color: #ffffff;",
-      "linear-gradient(90deg, var(--xposter-drop-signal-text), var(--xposter-drop-signal) 52%, #0f7acb)"
+      "linear-gradient(90deg, var(--xposter-drop-signal-text), var(--xposter-drop-signal) 52%, #0f7acb)",
+      "hint.dataset.intent = intent",
+      "hint.dataset.mode = mode",
+      "hint.dataset.state = \"ready\"",
+      "hint.dataset.state = \"processing\"",
+      "hint.dataset.surface =",
+      "title.textContent = translateContentText(copy.title)",
+      "detail.textContent = translateContentText(copy.detail)",
+      "status.textContent = translateContentText(dropHintStatusLabel(mode, intent))",
+      "hint.style.setProperty(\"--xposter-drop-surface-left\"",
+      "const title = hint.querySelector(\"strong\");",
+      "const detail = hint.querySelector(\"p\");",
+      "const status = hint.querySelector(\".__xposter_drop_status\");"
     ]),
   "X page drag feedback should use a taller light-blue bottom dock with blue outline, explicit folder drop copy, and reduced motion coverage"
 );
@@ -476,16 +659,39 @@ assert.ok(
     !contentScriptText.includes("function hasSingleUnknownFileItem") &&
     contentScriptText.includes("function transferFilesFromDataTransfer") &&
     contentScriptText.includes("typeof item.getAsFile !== \"function\"") &&
+    contentScriptText.includes("function partitionTransferFiles") &&
+    contentScriptText.includes("function summarizeTransferItems") &&
     contentScriptText.includes("function markdownTransferFileCount") &&
-    contentScriptText.includes("const markdownFileCount = markdownTransferFileCount(dataTransfer);") &&
+    contentScriptText.includes('if (intent === "sidepanel-queue" && markdownFiles.length === 1) intent = "article";') &&
+    contentScriptText.includes("const markdownFileCount = markdownTransferFileCount(dataTransfer, files, fileGroups.markdownFiles.length, itemSummary);") &&
     contentScriptText.includes("if (markdownFileCount > 1) return \"sidepanel-queue\";") &&
     contentScriptText.includes("if (markdownFileCount === 1) return \"\";") &&
     contentScriptText.includes("function hasUnmaterializedFileDrop") &&
+    contentScriptText.includes("hasUnmaterializedFileDrop(dataTransfer, files)") &&
     contentScriptText.includes("isDropEventOverSurface(event, \"sidepanel-queue\")") &&
     contentScriptText.includes("intent !== \"sidepanel-queue\"") &&
     contentScriptText.includes("const panelPromise = safeRuntimeSendMessage({ type: \"xposter:open-side-panel\" }).catch(() => {})") &&
-    contentScriptText.includes("await queueMarkdownFilesForSidePanel(markdownFiles, { openPanelPromise: panelPromise })"),
+    contentScriptText.includes("if (markdownFiles.length > 1) await queueMarkdownFilesForSidePanel(markdownFiles, { openPanelPromise: panelPromise });") &&
+    contentScriptText.includes("await queueMarkdownFilesForSidePanel(markdownFiles, { openPanelPromise: panelPromise })") &&
+    contentScriptText.includes("handleSidePanelMarkdownDrop(event.dataTransfer, intent, { openPanelPromise: panelPromise, markdownFiles })") &&
+    contentScriptText.includes("handleSidePanelMarkdownDrop(event.dataTransfer, intent, { markdownFiles })") &&
+    contentScriptText.includes("const files = markdownFiles || markdownFilesFromTransfer(dataTransfer);") &&
+    !contentScriptText.includes("files.filter(isMarkdownFile).length > 1 || markdownTransferFileCount(dataTransfer) > 1") &&
+    !contentScriptText.includes("files.some(isMarkdownFile) || markdownTransferFileCount(dataTransfer) === 1") &&
+    !contentScriptText.includes("files.some(isImageFile)") &&
+    !contentScriptText.includes("items.filter(isLikelyMarkdownTransferItem)") &&
+    !contentScriptText.includes("items.some(isLikelyImageTransferItem)) return items.length"),
   "X page drops should open single Markdown files in X Articles and robustly queue multiple Markdown files in the side panel"
+);
+assert.ok(
+  /document\.addEventListener\("drop", async \(event\) => \{\s+let intent = dropIntentForEvent\(event\);\s+if \(intent === "none"\) return;\s+event\.preventDefault\(\);\s+event\.stopPropagation\(\);\s+let files = transferFilesFromDataTransfer\(event\.dataTransfer\);/.test(contentScriptText) &&
+    contentScriptText.includes("function transferHasFileSystemHandleItems(dataTransfer)") &&
+    contentScriptText.includes("async function resolveTransferFilesFromDataTransfer(dataTransfer, files = transferFilesFromDataTransfer(dataTransfer))") &&
+    contentScriptText.includes("files = await resolveTransferFilesFromDataTransfer(event.dataTransfer, files);") &&
+    contentScriptText.includes("const file = await handle.getFile();") &&
+    contentScriptText.includes("return uniqueTransferFiles(resolved);") &&
+    contentScriptText.includes("Could not read the dropped Markdown file. Try the import button or drop a real .md file."),
+  "X page bottom dock drops should recover File System Access handles and warn instead of silently swallowing unreadable Markdown"
 );
 assert.ok(
   includesAll(contentScriptText, [
@@ -525,13 +731,13 @@ assert.ok(
     'downloadMarkdown(article.markdown, article.fileName)',
     'notifyArticleExportSuccess(root, "download", article)',
     'notifyArticleExportSuccess(root, "copy", article)',
-    'root.dataset.articleFileName = article.fileName || articleFileName(article.title)',
-    'root.dataset.articleCharacterCount = String(article.characterCount || 0)',
-    'root.dataset.articleImageCount = String(article.imageCount || 0)',
+    'setDatasetValueIfChanged(root, "articleFileName", article.fileName || articleFileName(article.title))',
+    'setDatasetValueIfChanged(root, "articleCharacterCount", article.characterCount || 0)',
+    'setDatasetValueIfChanged(root, "articleImageCount", article.imageCount || 0)',
     'placeArticleExportRoot(root, article)',
     'if (root.parentElement !== anchor) anchor.appendChild(root)',
-    'root.dataset.placement = "inline"',
-    'root.dataset.placement = "fixed"',
+    'setDatasetValueIfChanged(root, "placement", "inline")',
+    'setDatasetValueIfChanged(root, "placement", "fixed")',
     'function articleNodeReadableText',
     'const heading = normalizeText(articleNodeReadableText(titleNode))',
     'clone?.querySelector?.(`#${ARTICLE_EXPORT_ID}`)?.remove()',
@@ -541,8 +747,11 @@ assert.ok(
     'right: var(--__xposter-article-export-inline-end, 24px)',
     'function articleDockInlineEnd',
     'width: fit-content',
-    'button.innerHTML = articleExportIconMarkup(buttonMode)',
-    'button.removeAttribute("data-active")',
+    'function articleExportNodes(root)',
+    'const { mark, buttons } = articleExportNodes(root)',
+    'const { feedback } = articleExportNodes(root)',
+    'setSourceHtmlIfChanged(button, articleExportIconMarkup(buttonMode))',
+    'removeDatasetValueIfChanged(button, "active")',
     'function articleExportIconMarkup',
     '.__xposter_article_export_actions',
     'opacity: 0',
@@ -567,7 +776,17 @@ assert.ok(
       'backdrop-filter: blur',
       'button[data-active="true"]',
       'button.textContent = articleExportShortLabel',
-      '[data-xposter-article-export-host="true"]'
+      '[data-xposter-article-export-host="true"]',
+      'root.dataset.articleFileName = article.fileName || articleFileName(article.title)',
+      'root.dataset.articleCharacterCount = String(article.characterCount || 0)',
+      'root.dataset.articleImageCount = String(article.imageCount || 0)',
+      'root.dataset.placement = "inline"',
+      'root.dataset.placement = "fixed"',
+      'button.innerHTML = articleExportIconMarkup(buttonMode)',
+      'button.removeAttribute("data-active")',
+      '__xposterArticleExportNodes',
+      'root.querySelectorAll("[data-export-action]").forEach',
+      'const feedback = root.querySelector(".__xposter_article_export_feedback");'
     ]),
   "readable X article pages should expose localized title-integrated Markdown copy/download tools with remembered action, title de-duplication, and file/count feedback"
 );
@@ -590,6 +809,11 @@ assert.equal(
   "the final image upload should leave room for final writing steps"
 );
 assert.equal(
+  statusSandbox.statusHelpers.statusProgressForText("Uploading image 1/1... waiting for X to finish.", "work"),
+  80,
+  "pending X image uploads should keep the visible progress alive"
+);
+assert.equal(
   statusSandbox.statusHelpers.statusProgressForText("Cleaning up import markers...", "work"),
   96,
   "cleanup should display near-complete progress"
@@ -600,6 +824,26 @@ assert.equal(
   "completed status should fill the status background"
 );
 assert.equal(statusSandbox.statusHelpers.translateContentText("Preparing Markdown..."), "正在准备 Markdown...", "X page status details should follow the selected language");
+assert.equal(
+  statusSandbox.statusHelpers.translateContentText("Uploading image 4/5... waiting for X to finish."),
+  "正在上传图片 4/5，等待 X 完成处理...",
+  "X page status should explain when an inserted image is waiting on X media processing"
+);
+assert.equal(
+  statusSandbox.statusHelpers.translateContentText("Image 4/5 is in the editor; continuing..."),
+  "图片 4/5 已进入编辑器，继续处理...",
+  "X page status should explain when xPoster continues after a stable pending media block"
+);
+assert.equal(
+  statusSandbox.statusHelpers.translateContentText("Article written in 12.3s. 1 image(s) are in the editor while X finishes media IDs."),
+  "文章已写入，用时 12.3s。1 张图片已进入编辑器，X 仍在完成媒体编号。",
+  "X page completion should distinguish pending X media IDs from failed image uploads"
+);
+assert.equal(
+  statusSandbox.statusHelpers.translateContentText("Article written in 12.3s. 1 body image(s) stayed as Markdown links; 2 image(s) are in the editor while X finishes media IDs. Replace unreachable image URLs with public links, then write again if those images must upload."),
+  "文章已写入，用时 12.3s。1 张正文图片保留为 Markdown 链接；2 张图片已进入编辑器，X 仍在完成媒体编号。",
+  "X page completion should keep pending X media IDs visible alongside skipped image warnings"
+);
 assert.equal(statusSandbox.statusHelpers.translateContentText("Writing article"), "正在写入文章", "X page status titles should be localized");
 assert.equal(statusSandbox.statusHelpers.translateContentText("Article title Markdown tools"), "文章标题区 Markdown 工具", "X article export group should describe its title placement");
 assert.equal(statusSandbox.statusHelpers.articleExportLabel("copy"), "复制 Markdown", "X article export controls should localize action labels");
@@ -619,20 +863,63 @@ assert.ok(
 );
 assert.ok(
   mainWorldText.includes("function markerTokenPattern") &&
-    mainWorldText.includes("text.replace(markerPattern, \"\")") &&
+    mainWorldText.includes("function allMarkerTokenPattern") &&
+    mainWorldText.includes(".replace(markerPattern, \"\")") &&
+    mainWorldText.includes(".replace(allMarkerTokenPattern(), \"\")") &&
     mainWorldText.includes("summary.markersCleaned += cleanupMarkers(draftNode, payload.markerPrefix)") &&
     mainWorldText.includes("draftNode = findDraftStateNode() || draftNode;"),
-  "main-world cleanup should remove leftover xPoster marker tokens from the latest Draft.js state"
+  "main-world cleanup should remove current and stale xPoster marker tokens from the latest Draft.js state"
+);
+assert.equal(mainMarkerSandbox.embeddedLocation?.blockKey, "a", "main-world marker lookup should find embedded marker block");
+assert.equal(mainMarkerSandbox.embeddedLocation?.offset, 6, "main-world marker lookup should report embedded marker offset");
+assert.equal(
+  mainMarkerSandbox.embeddedLocation?.length,
+  "__XPOSTER_newaa_IMAGE_1__".length,
+  "main-world marker lookup should report embedded marker length"
+);
+assert.equal(mainMarkerSandbox.embeddedLocation?.exact, false, "embedded marker lookup should not be treated as exact");
+assert.equal(mainMarkerSandbox.cleanedCount, 2, "main-world marker cleanup should remove stale random-prefix markers");
+assert.equal(
+  JSON.stringify(mainMarkerSandbox.cleanedKeys),
+  JSON.stringify(["a", "c"]),
+  "standalone stale marker blocks should be deleted"
+);
+assert.equal(mainMarkerSandbox.cleanedTexts.a, "Before after", "embedded stale marker tokens should be removed without deleting text");
+assert.equal(
+  JSON.stringify(mainMarkerSandbox.exactRelocateKeys),
+  JSON.stringify(["p1", "img", "p2"]),
+  "exact marker blocks should be replaced by the uploaded image block during relocation"
+);
+assert.equal(mainMarkerSandbox.exactRelocateResult.moved, 1, "exact marker relocation should count the moved image");
+assert.equal(
+  JSON.stringify(mainMarkerSandbox.embeddedRelocateKeys),
+  JSON.stringify(["p1", "img", "marker", "p2"]),
+  "embedded marker blocks should keep their text block while moving the image before it"
+);
+assert.equal(
+  mainMarkerSandbox.embeddedRelocateTexts.marker,
+  "Text before __XPOSTER_newaa_IMAGE_1__ text after",
+  "embedded marker relocation should not drop surrounding article text"
 );
 assert.ok(
-  mainWorldText.includes("const MEDIA_UPLOAD_BASE_TIMEOUT_MS = 90000") &&
+    mainWorldText.includes("const MEDIA_UPLOAD_BASE_TIMEOUT_MS = 90000") &&
     mainWorldText.includes("const MEDIA_UPLOAD_MAX_TIMEOUT_MS = 150000") &&
     mainWorldText.includes("const MEDIA_UPLOAD_PROGRESS_HEARTBEAT_MS = 15000") &&
-    mainWorldText.includes("progress(`Uploading image ${index}/${total}...`)") &&
+    mainWorldText.includes("const MEDIA_UPLOAD_PENDING_READY_MS = 20000") &&
+    mainWorldText.includes("const MEDIA_UPLOAD_PENDING_STABLE_MS = 5000") &&
+    mainWorldText.includes("function canUsePendingMediaUpload(operation)") &&
+    mainWorldText.includes("return !operation?.op?.coverOnly;") &&
+    mainWorldText.includes("Uploading image ${index}/${total}... waiting for X to finish.") &&
+    mainWorldText.includes("Image ${index}/${total} is in the editor; continuing...") &&
     mainWorldText.includes("function findNewMediaUpload") &&
     mainWorldText.includes("if (candidate.mediaId) complete = candidate;") &&
     mainWorldText.includes("else pending ||= candidate;") &&
     mainWorldText.includes("if (found?.mediaId)") &&
+    mainWorldText.includes("canUsePendingMediaUpload(imageOperation)") &&
+    mainWorldText.includes("now - pendingFirstSeenAt >= MEDIA_UPLOAD_PENDING_READY_MS") &&
+    mainWorldText.includes("now - pendingStableSince >= MEDIA_UPLOAD_PENDING_STABLE_MS") &&
+    mainWorldText.includes("mediaPending: true") &&
+    mainWorldText.includes("if (result.mediaPending) summary.imgPending += 1") &&
     contentScriptText.includes("const MAIN_WORLD_SILENCE_TIMEOUT_MS = 180000") &&
     contentScriptText.includes("}, MAIN_WORLD_SILENCE_TIMEOUT_MS);") &&
     mainWorldText.includes("X media upload took too long. X may be throttling this draft") &&
@@ -656,6 +943,16 @@ assert.equal(
   "0987654321",
   "main-world should recognize X media ids from snake_case entity data"
 );
+assert.equal(
+  mainMediaSandbox.nestedMediaKeyUpload?.mediaId,
+  "1122334455",
+  "main-world should normalize nested X media keys into media ids"
+);
+assert.equal(
+  mainMediaSandbox.restIdUpload?.mediaId,
+  "9988776655",
+  "main-world should recognize rest_id media identifiers from nested entity data"
+);
 assert.equal(mainMediaSandbox.existingUpload, null, "main-world should ignore media entities that existed before the current upload step");
 assert.ok(
   contentScriptText.includes("image upload(s) timed out in X") &&
@@ -672,23 +969,81 @@ assert.ok(
   "side panel should report remote image host access from runtime permissions"
 );
 assert.ok(
+  sidepanelText.includes("function remoteImageOriginCountsFromSegments(segments = [])") &&
+    sidepanelText.includes("function remoteImageOriginsFromSegments(segments = [])") &&
+    sidepanelText.includes("function remoteImageEvidenceFromSegments(segments = [])") &&
+    sidepanelText.includes("const imageSegments = segments || [];") &&
+    sidepanelText.includes("count: imageSegments.length") &&
+    sidepanelText.includes("origins: remoteImageOriginsFromSegments(imageSegments)") &&
+    sidepanelText.includes("return remoteImageOriginCountsFromSegments(remoteHttpImageSegments(parsed));") &&
+    sidepanelText.includes("return remoteImageOriginsFromSegments(remoteHttpImageSegments(parsed));") &&
+    sidepanelText.includes("const remoteImages = remoteHttpImageSegments(parsed);") &&
+    sidepanelText.includes("remoteImages: remoteImageEvidenceFromSegments(remoteImages)") &&
+    sidepanelText.includes("const draftRemoteImages = latestParsed ? remoteHttpImageSegments(latestParsed) : [];") &&
+    sidepanelText.includes("remoteImages: remoteImageEvidenceFromSegments(draftRemoteImages)") &&
+    sidepanelText.includes("const evidenceRemoteImages = latestParsed ? remoteHttpImageSegments(latestParsed) : [];") &&
+    sidepanelText.includes("remoteImages: remoteImageEvidenceFromSegments(evidenceRemoteImages)") &&
+    !sidepanelText.includes("origins: remoteImageOrigins(parsed),"),
+  "draft and technical evidence should reuse collected remote image lists when deriving remote image metadata"
+);
+assert.ok(
   sidepanelText.includes("function preflightMarkdowns") &&
     sidepanelText.includes("function preflightSegmentCounts") &&
     sidepanelText.includes("function localImageFolderStatusForMarkdowns") &&
     sidepanelText.includes("function remoteHttpImageSegmentsForMarkdowns") &&
     sidepanelText.includes("function mediaUploadEstimateForMarkdowns") &&
-    sidepanelText.includes("remoteImageOriginsForMarkdowns(draftQueue.map((item) => item.markdown), importOptions)") &&
-    sidepanelText.includes("const preflightContext = { markdowns }") &&
-    sidepanelText.includes("localAssetWriteBlocker(checks, preflightContext)") &&
-    sidepanelText.includes("firstQueueMediaLimitBlocker(mediaUploadEstimateForMarkdowns(markdowns, importOptions))") &&
+    sidepanelText.includes("function parsedDraftsForMarkdowns(markdowns = [], options = importOptions)") &&
+    sidepanelText.includes("function segmentCountsForParsedDrafts(parsedDrafts = [])") &&
+    sidepanelText.includes("function localImageReferencesForParsedDrafts(parsedDrafts = [])") &&
+    sidepanelText.includes("function mediaUploadEstimateForParsedDrafts(parsedDrafts = [])") &&
+    sidepanelText.includes("function remoteHttpImageSegmentsForParsedDrafts(parsedDrafts = [])") &&
+    sidepanelText.includes("const parsedDrafts = parsedDraftsForMarkdowns(markdowns, importOptions);") &&
+    sidepanelText.includes("const preflightContext = { markdowns, parsedDrafts }") &&
+    sidepanelText.includes("const checks = buildPreflightChecks(preflightContext);") &&
+    sidepanelText.includes("updatePreflight(checks);") &&
+    sidepanelText.includes("localAssetWriteBlocker(checks, { ...preflightContext, byId })") &&
+    sidepanelText.includes("firstQueueMediaLimitBlocker(mediaUploadEstimateForParsedDrafts(parsedDrafts))") &&
+    sidepanelText.includes("remoteImageOriginsFromSegments(remoteHttpImageSegmentsForParsedDrafts(parsedDrafts))") &&
+    !sidepanelText.includes("remoteImageOriginsForMarkdowns(draftQueue.map((item) => item.markdown), importOptions)") &&
+    !sidepanelText.includes("firstQueueMediaLimitBlocker(mediaUploadEstimateForMarkdowns(markdowns, importOptions))") &&
+    contentScriptText.includes("function articleMediaUploadEstimate") &&
+    contentScriptText.includes("let bodyImages = 0;") &&
+    contentScriptText.includes("let tables = 0;") &&
+    contentScriptText.includes("let coverInBody = false;") &&
+    contentScriptText.includes("for (const segment of segments) {") &&
+    contentScriptText.includes("shared.imageSourcesMatch(segment.source, coverSource)") &&
+    !contentScriptText.includes('const bodyImages = segments.filter((segment) => segment.type === "image").length') &&
+    !contentScriptText.includes('const tables = segments.filter((segment) => segment.type === "table").length') &&
+    !contentScriptText.includes('const coverOnly = coverSource && !segments.some(') &&
+    sidepanelText.includes("const results = [];") &&
+    sidepanelText.includes("let ok = 0;") &&
+    sidepanelText.includes("let fail = 0;") &&
+    sidepanelText.includes("let pending = 0;") &&
+    sidepanelText.includes("images.forEach((segment, index) => {") &&
+    sidepanelText.includes("if (result.ok === true) ok += 1;") &&
+    sidepanelText.includes("else if (result.ok === false) fail += 1;") &&
+    sidepanelText.includes("else pending += 1;") &&
+    sidepanelText.includes("const allCurrentImagesHaveResults = images.length > 0 && pending === 0;") &&
+    !sidepanelText.includes("const results = images.map((segment, index) =>") &&
+    !sidepanelText.includes("results.every((item) => item.ok === true || item.ok === false)") &&
+    !sidepanelText.includes("results.filter((item) => item.ok === true).length") &&
+    !sidepanelText.includes("results.filter((item) => item.ok === false).length") &&
     sidepanelText.includes('localizeInterpolated("Draft {index}: {title}"') &&
     sidepanelMessagesText.includes('"Draft {index}: {title}"'),
   "batch queue writes should aggregate queued Markdown preflight, request all remote image origins, and block local/media problems before the first write"
 );
 assert.ok(
   sidepanelText.includes("function hasMarkdownTransfer") &&
-    sidepanelText.includes("if (files.length) return files.some(isMarkdownFile);") &&
-    sidepanelText.includes("items.some(isLikelyImageTransferItem)") &&
+    sidepanelText.includes("function summarizeMarkdownTransferFiles") &&
+    sidepanelText.includes("function summarizeMarkdownTransferItems") &&
+    sidepanelText.includes("if (fileSummary.hasFiles) return Boolean(fileSummary.markdownFiles.length);") &&
+    sidepanelText.includes("if (itemSummary.hasLikelyMarkdown) return true;") &&
+    sidepanelText.includes("if (itemSummary.hasLikelyImage) return false;") &&
+    sidepanelText.includes("const { markdownFiles } = summarizeMarkdownTransferFiles(dataTransfer?.files);") &&
+    !sidepanelText.includes("if (files.length) return files.some(isMarkdownFile);") &&
+    !sidepanelText.includes("if (items.some(isLikelyMarkdownTransferItem)) return true;") &&
+    !sidepanelText.includes("if (items.some(isLikelyImageTransferItem)) return false;") &&
+    !sidepanelText.includes("if (files.some(isMarkdownFile)) return true;") &&
     !sidepanelText.includes('if (types.includes("Files")) return true;'),
   "side panel page-level drop tray should ignore image files and only respond to Markdown/text drafts"
 );
@@ -698,6 +1053,38 @@ assert.ok(
     contentScriptText.includes('message?.type === "xposter:cancel-import"') &&
     contentScriptText.includes('class="__xposter_status_stop"') &&
     contentScriptText.includes('cancelActiveImport();') &&
+    contentScriptText.includes("function setDatasetValueIfChanged(node, key, value)") &&
+    contentScriptText.includes("function setTextContentIfChanged(node, value)") &&
+    contentScriptText.includes("function setSourceHtmlIfChanged(node, html)") &&
+    contentScriptText.includes("function setClassPresenceIfChanged(node, className, present)") &&
+    contentScriptText.includes("const nodeCache = new WeakMap();") &&
+    contentScriptText.includes("function cachedElementNodes(root, key, collect, isValid)") &&
+    contentScriptText.includes('setDatasetValueIfChanged(card, "level", level)') &&
+    contentScriptText.includes('setDatasetValueIfChanged(card, "statusText", text)') &&
+    contentScriptText.includes("function statusCardNodes(card)") &&
+    contentScriptText.includes("const { title, detail } = statusCardNodes(card);") &&
+    contentScriptText.includes('statusCardNodes(card).stopButton?.addEventListener("click"') &&
+    contentScriptText.includes("const button = statusCardNodes(card).stopButton;") &&
+    contentScriptText.includes('setClassPresenceIfChanged(document.body, "__xposter_status_visible", true)') &&
+    contentScriptText.includes('setClassPresenceIfChanged(document.body, "__xposter_status_visible", false)') &&
+    contentScriptText.includes('setDatasetValueIfChanged(card, "progress", hasProgress ? "determinate" : level === "work" ? "indeterminate" : "none")') &&
+    contentScriptText.includes('setStylePropertyIfChanged(card, "--__xposter-status-progress", `${boundedPercent}%`)') &&
+    contentScriptText.includes('removeStylePropertyIfChanged(card, "--__xposter-status-progress")') &&
+    contentScriptText.includes('setBooleanPropertyIfChanged(button, "hidden", !visible)') &&
+    contentScriptText.includes('setTextContentIfChanged(button, translateContentText(stopping ? "Stopping..." : "Stop"))') &&
+    !contentScriptText.includes("card.dataset.level = level") &&
+    !contentScriptText.includes("card.dataset.statusText = text") &&
+    !contentScriptText.includes('card.style.setProperty("--__xposter-status-progress"') &&
+    !contentScriptText.includes('card.style.removeProperty("--__xposter-status-progress"') &&
+    !contentScriptText.includes('document.body.classList.add("__xposter_status_visible")') &&
+    !contentScriptText.includes('document.body.classList.remove("__xposter_status_visible")') &&
+    !contentScriptText.includes("button.hidden = !visible") &&
+    !contentScriptText.includes('button.textContent = translateContentText(stopping ? "Stopping..." : "Stop")') &&
+    !contentScriptText.includes("__xposterStatusNodes") &&
+    !contentScriptText.includes('card.querySelector(".__xposter_status_stop")?.addEventListener') &&
+    !contentScriptText.includes('const title = card.querySelector("strong");') &&
+    !contentScriptText.includes('const detail = card.querySelector("p");') &&
+    !contentScriptText.includes('const button = card?.querySelector?.(".__xposter_status_stop");') &&
     contentScriptText.includes("function syncStatusStopButton") &&
     contentScriptText.includes("function cancelActiveImport") &&
     contentScriptText.includes("function throwIfImportCancelled") &&
@@ -720,12 +1107,53 @@ assert.ok(
     sidepanelHtml.includes('id="draftMediaAlert"') &&
     sidepanelCss.includes(".draft-media-alert") &&
     sidepanelText.includes("function syncDraftMediaAlert") &&
+    sidepanelText.includes("function setDraftMediaAlertState") &&
+    sidepanelText.includes("function setMediaLimitAlertDetail") &&
+    sidepanelText.includes("function setLocalizedMessageIfChanged(node, key, values = {})") &&
+    sidepanelText.includes("function setLocalizedText(node, source)") &&
+    sidepanelText.includes("setLocalizedTextIfChanged(node, source)") &&
+    sidepanelText.includes("function setLocalizedMessage(node, key, values = {})") &&
+    sidepanelText.includes("setLocalizedMessageIfChanged(node, key, values)") &&
+    sidepanelText.includes('setDraftMediaAlertState({ hidden: false, tone: "danger" })') &&
+    sidepanelText.includes('setDraftMediaAlertState({ hidden: false, tone: batchWriteProgressTone(), role: "status", live: "polite" })') &&
+    sidepanelText.includes("setMediaLimitAlertDetail(estimate)") &&
+    sidepanelText.includes('setLocalizedMessageIfChanged(els.draftMediaAlertDetail, "Success {done}/{total} drafts", batchWriteProgressValues())') &&
+    sidepanelText.includes('removeDatasetValueIfChanged(els.draftMediaAlert, "tone")') &&
+    sidepanelText.includes('removeDatasetValueIfChanged(els.draftMediaAlertDetail, "i18n")') &&
+    sidepanelText.includes("setTextContentIfChanged(els.draftMediaAlertDetail, text)") &&
     sidepanelText.includes("els.draftMediaAlertDetail.__xposterSourceText = X_ARTICLE_MEDIA_LIMIT_WARNING") &&
     sidepanelText.includes('text: "Fix the image count in the editor."') &&
     sidepanelText.includes('if (mediaEstimate.nearSoftLimit)') &&
     sidepanelText.includes('text: "Close to the image limit."') &&
     sidepanelText.includes("function quietImportHint") &&
+    sidepanelText.includes("function compactWriteHint({ hasDraft, hasQueue = false, busy = false } = {})") &&
+    sidepanelText.includes("const remoteCount = remoteHttpImageSegments(latestParsed).length;") &&
+    sidepanelText.includes("const mediaEstimate = mediaUploadEstimate(latestParsed);") &&
+    sidepanelText.includes("if (remoteCount) return remoteImageWriteHint(remoteCount, mediaEstimate);") &&
+    sidepanelText.includes("function remoteImageWriteHint(remoteCount, mediaEstimate = mediaUploadEstimate(latestParsed))") &&
+    !sidepanelText.includes("if (remoteCount) return remoteImageWriteHint(remoteCount);\n    const mediaEstimate = mediaUploadEstimate(latestParsed);") &&
     sidepanelText.includes("function mediaUploadEstimate") &&
+    sidepanelText.includes("let bodyImages = 0;") &&
+    sidepanelText.includes("let tables = 0;") &&
+    sidepanelText.includes("let coverInBody = false;") &&
+    sidepanelText.includes("function localImageReferences") &&
+    sidepanelText.includes("const coverIsLocal = Boolean(coverSource && shared.isLocalImageSource(coverSource));") &&
+    sidepanelText.includes("for (const segment of parsed?.segments || []) {") &&
+    sidepanelText.includes('if (segment.type !== "image" || !shared.isLocalImageSource(segment.source)) continue;') &&
+    sidepanelText.includes("if (coverIsLocal && !coverInBody && shared.imageSourcesMatch(segment.source, coverSource)) coverInBody = true;") &&
+    sidepanelText.includes("function localImageFolderStatusForReferences") &&
+    sidepanelText.includes("let absoluteCount = 0;") &&
+    sidepanelText.includes("for (const item of references) {") &&
+    sidepanelText.includes("if (shared.isAbsoluteLocalImageSource(item.source)) absoluteCount += 1;") &&
+    sidepanelText.includes("function remoteHttpImageSegmentsIncludingCover") &&
+    sidepanelText.includes("const coverIsRemote = Boolean(cover && isRemoteHttpImageSource(cover));") &&
+    sidepanelText.includes("if (coverIsRemote && !coverInBody && shared.imageSourcesMatch(segment.source, cover)) coverInBody = true;") &&
+    sidepanelText.includes("for (const segment of parsed.segments) {") &&
+    sidepanelText.includes('if (segment.type === "image") {') &&
+    sidepanelText.includes("bodyImages += 1;") &&
+    sidepanelText.includes("shared.imageSourcesMatch(segment.source, coverSource)") &&
+    sidepanelText.includes('} else if (segment.type === "table") {') &&
+    sidepanelText.includes("tables += 1;") &&
     sidepanelText.includes("mediaLimitWarningText") &&
     sidepanelText.includes("mediaHeadroomText") &&
     sidepanelText.includes("mediaCapacityText") &&
@@ -734,6 +1162,14 @@ assert.ok(
     sidepanelMessagesText.includes("X Article media note") &&
     sidepanelMessagesText.includes("Images: {count}/{limit}") &&
     sidepanelMessagesText.includes("Remove {extra} image(s)") &&
+    !sidepanelText.includes('const bodyImages = parsed.segments.filter((segment) => segment.type === "image").length') &&
+    !sidepanelText.includes('const tables = parsed.segments.filter((segment) => segment.type === "table").length') &&
+    !sidepanelText.includes('const coverOnly = coverSource && !parsed.segments.some(') &&
+    !sidepanelText.includes("const references = localImageSegments(parsed).map((segment) => ({") &&
+    !sidepanelText.includes("!references.some((item) => shared.imageSourcesMatch(item.source, coverSource))") &&
+    !sidepanelText.includes("const absoluteCount = references.filter((item) => shared.isAbsoluteLocalImageSource(item.source)).length") &&
+    !sidepanelText.includes("const segments = (parsed?.segments || []).filter((segment) => segment.type === \"image\" && isRemoteHttpImageSource(segment.source))") &&
+    !sidepanelText.includes("!segments.some((segment) => shared.imageSourcesMatch(segment.source, cover))") &&
     !sidepanelText.includes("Image plan: {count}/20") &&
     !contentScriptText.includes("Image plan: {count}/20"),
   "draft preflight should allow up to 25 media uploads and show a centered editor warning only above that limit"
@@ -792,6 +1228,12 @@ assert.ok(
     sidepanelText.includes("function localAssetWriteBlocker") &&
     sidepanelText.includes("handleLocalAssetWriteBlocker(localAssetBlocker") &&
     sidepanelText.includes('button[data-preflight-action]') &&
+    contentScriptText.includes('panel.addEventListener("click", async (event) =>') &&
+    contentScriptText.includes('const button = event.target.closest?.("button");') &&
+    contentScriptText.includes('if (button?.id === "xposter-vault-skip")') &&
+    contentScriptText.includes('if (button?.id !== "xposter-vault-pick") return;') &&
+    !contentScriptText.includes('panel.querySelector("#xposter-vault-skip").addEventListener') &&
+    !contentScriptText.includes('panel.querySelector("#xposter-vault-pick").addEventListener') &&
     sidepanelText.includes("Choose the folder that contains their relative paths.") &&
     sidepanelMessagesText.includes("Local image path blocked") &&
     sidepanelMessagesText.includes("No folder connected. xPoster will ask when a draft needs local images.") &&
@@ -810,11 +1252,20 @@ assert.ok(
 );
 assert.ok(
   contentScriptText.includes("[/^Uploading image (\\d+)\\/(\\d+)\\.\\.\\.$/, \"正在上传图片 $1/$2...\"]") &&
+    contentScriptText.includes("waiting for X to finish") &&
+    contentScriptText.includes("X 仍在完成媒体编号") &&
     contentScriptText.includes("正在设置封面") &&
     contentScriptText.includes("正在清理写入标记") &&
     contentScriptText.includes("\"Stop\": \"停止\"") &&
     contentScriptText.includes("\"Stopping...\": \"正在停止...\""),
   "X page upload progress and stop controls should stay localized in Chinese"
+);
+assert.ok(
+  sidepanelText.includes("Replace unreachable image URLs with public links, then write again if those images must upload.") &&
+    sidepanelPatternsText.includes("body image\\(s\\) stayed as Markdown links; (.+) image\\(s\\) are in the editor while X finishes media IDs") &&
+    sidepanelPatternsText.indexOf("body image\\(s\\) kept as Markdown links; (.+) image\\(s\\) are in the editor while X finishes media IDs") <
+      sidepanelPatternsText.indexOf("body image\\(s\\) kept as Markdown links; (.+)\\/"),
+  "completion summaries should keep pending X media IDs visible alongside media warning text"
 );
 assert.ok(
   sidepanelText.includes("function writeOptionsPayload") &&
@@ -872,6 +1323,7 @@ assert.ok(
     sidepanelHtml.includes('id="recordClearConfirm"') &&
     sidepanelHtml.includes('id="confirmRecordClear"') &&
     sidepanelHtml.includes('id="cancelRecordClear"') &&
+    sidepanelHtml.includes('class="record-clear-wrap" hidden') &&
     sidepanelHtml.includes('class="record-clear-button"') &&
     !sidepanelHtml.includes('class="secondary compact danger record-clear-button"') &&
     sidepanelHtml.indexOf('id="recordHistoryMeta"') < sidepanelHtml.indexOf('id="clearRecordHistory"') &&
@@ -883,6 +1335,7 @@ assert.ok(
     sidepanelCss.includes("grid-template-columns: minmax(0, 1fr) auto;") &&
     sidepanelCss.includes("#recordHistoryMeta::before") &&
     sidepanelCss.includes(".record-clear-button") &&
+    sidepanelCss.includes(".record-clear-wrap[hidden]") &&
     sidepanelCss.includes("border-radius: 999px;") &&
     sidepanelCss.includes("text-decoration: none;"),
   "record history metadata toolbar should keep balanced two-column alignment and avoid underlined clear-all text"
@@ -890,9 +1343,81 @@ assert.ok(
 assert.ok(
   sidepanelText.includes("function openRecordClearConfirm") &&
     sidepanelText.includes("function closeRecordClearConfirm") &&
+    sidepanelText.includes("function setRecordClearActionState") &&
+    sidepanelText.includes("function recordHistoryMetaText") &&
+    sidepanelText.includes("function recordSearchSummaryText") &&
+    sidepanelText.includes("const recordSearchTextCache = new WeakMap();") &&
+    sidepanelText.includes("function cachedRecordSearchText(record)") &&
+    sidepanelText.includes("if (cached?.language === currentLanguage) return cached.text;") &&
+    sidepanelText.includes("recordSearchTextCache.set(record, { language: currentLanguage, text });") &&
+    sidepanelText.includes("function recordHistoryView()") &&
+    sidepanelText.includes("const visibleRecords = [];") &&
+    sidepanelText.includes("for (const record of recordHistory) {") &&
+    sidepanelText.includes("if (!recordHasMarkdown(record)) continue;") &&
+    sidepanelText.includes("const haystack = cachedRecordSearchText(record);") &&
+    sidepanelText.includes("visibleRecords.push(record);") &&
+    sidepanelText.includes("return { total, visibleRecords, isSearching: terms.length > 0 };") &&
+    sidepanelText.includes("const pendingIds = new Set(pending.map((item) => item.id));") &&
+    sidepanelText.includes("storedHistory.filter((item) => !pendingIds.has(item.id))") &&
+    sidepanelText.includes("const { total, visibleRecords, isSearching } = recordHistoryView();") &&
+    sidepanelText.includes('const recordClearWrap = els.clearRecordHistory?.closest(".record-clear-wrap") || null;') &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(els.recordClearConfirm, "hidden", false)') &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(els.recordClearConfirm, "hidden", true)') &&
+    sidepanelText.includes('setAttributeValueIfChanged(els.clearRecordHistory, "aria-expanded", "true")') &&
+    sidepanelText.includes('setAttributeValueIfChanged(els.clearRecordHistory, "aria-expanded", "false")') &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(els.clearRecordHistory, "disabled", !hasRecoverableRecords)') &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(recordClearWrap, "hidden", !hasRecoverableRecords)') &&
+    sidepanelText.includes("setSourceHtmlIfChanged(els.recordHistoryList, recordHistoryHtml)") &&
+    sidepanelText.includes("setTextContentIfChanged(els.recordHistoryMeta, recordHistoryMetaText(recordCounts))") &&
+    sidepanelText.includes('setDatasetValueIfChanged(els.recordSearchSummary, "i18n", searchSummary)') &&
+    !sidepanelText.includes("els.recordHistoryList.innerHTML = visibleRecords.map(renderRecordHistoryItem).join(\"\")") &&
+    !sidepanelText.includes("els.recordHistoryMeta.textContent = recordHistoryMetaText(recordCounts)") &&
+    !sidepanelText.includes("function filteredRecordHistory()") &&
+    !sidepanelText.includes("const recoverableRecords = recordHistory.filter(recordHasMarkdown)") &&
+    !sidepanelText.includes("storedHistory.filter((item) => !pending.some((pendingItem) => pendingItem.id === item.id))") &&
+    !sidepanelText.includes("const visibleRecords = filteredRecordHistory().filter(recordHasMarkdown)") &&
+    !sidepanelText.includes("const haystack = recordSearchText(record);") &&
+    !sidepanelText.includes("recordClearWrap.hidden = !hasRecoverableRecords") &&
+    !sidepanelText.includes("els.recordClearConfirm.hidden = false") &&
+    !sidepanelText.includes("els.recordClearConfirm.hidden = true") &&
+    !sidepanelText.includes('els.clearRecordHistory.setAttribute("aria-expanded", "true")') &&
+    !sidepanelText.includes('els.clearRecordHistory.setAttribute("aria-expanded", "false")') &&
     sidepanelText.includes("handleRecordClearDismiss") &&
     sidepanelText.includes('els.confirmRecordClear?.addEventListener("click", clearRecordHistory)'),
-  "record clear-all should require a dismissible second confirmation"
+  "record clear-all and record history refreshes should use changed-only DOM writes with a dismissible second confirmation"
+);
+assert.ok(
+  /\.draft-editor-status\s*\{[\s\S]*?background:\s*var\(--paper\);/.test(sidepanelCss) &&
+    !sidepanelCss.includes(':root[data-theme="dark"] .draft-editor-status'),
+  "draft editor status bar should keep the Preview control on a flat paper background"
+);
+assert.ok(
+  /\.progress-meter span\s*\{[\s\S]*?width:\s*100%;[\s\S]*?transform:\s*scaleX\(0\);[\s\S]*?transition:\s*transform 180ms ease-out, background-color 180ms ease-out;/.test(sidepanelCss) &&
+    sidepanelText.includes('function setStyleValueIfChanged(node, property, value)') &&
+    sidepanelText.includes('function setLocalizedTextIfChanged(node, source)') &&
+    sidepanelText.includes('function syncStatusRow(item, { tone, label, detail, status } = {})') &&
+    sidepanelText.includes('setStyleValueIfChanged(els.liveProgressBar, "transform", `scaleX(${percent / 100})`);') &&
+    sidepanelText.includes('setLocalizedTextIfChanged(els.liveProgressTitle, state.text || "Nothing is running");') &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(els.cancelImport, "hidden", !cancellable);') &&
+    !sidepanelCss.includes("transition: width 180ms ease-out") &&
+    !sidepanelText.includes("els.liveProgressBar.style.width ="),
+  "live progress meter should animate with transform and avoid redundant DOM writes on repeated progress updates"
+);
+assert.ok(
+  sidepanelText.includes('data-record-action="delete-record"') &&
+    sidepanelText.includes("function removeRecordHistoryItem") &&
+    sidepanelText.includes('log("Record deleted.")') &&
+    sidepanelMessagesText.includes('"Clear this record."') &&
+    sidepanelMessagesText.includes('"Record deleted."') &&
+    sidepanelCss.includes(".record-delete-action") &&
+    sidepanelCss.includes(".record-delete-action svg") &&
+    sidepanelCss.includes("fill: none;") &&
+    sidepanelCss.includes("stroke-linejoin: round;") &&
+    sidepanelCss.includes("transition-delay: 0s, 0s, 620ms, 620ms, 620ms;") &&
+    sidepanelCss.includes(".record-history-item:focus-within .record-delete-action") &&
+    sidepanelCss.includes(".record-delete-action:hover") &&
+    sidepanelText.includes('M4.8 7h14.4'),
+  "record cards should reveal a delayed per-record clear action that removes only that saved record"
 );
 assert.ok(
   !sidepanelHtml.includes('data-i18n="Clear saved record history from this browser."') &&
@@ -917,9 +1442,38 @@ assert.ok(
     sidepanelHtml.includes('<option value="ru">Русский</option>') &&
     sidepanelHtml.includes('id="languageSelectButton"') &&
     sidepanelHtml.includes('id="languageOptionsList"') &&
+    sidepanelText.includes("let languageOptionButtons = [];") &&
     sidepanelText.includes("function populateLanguageSelect") &&
     sidepanelText.includes("function languageOptionLabel") &&
+    sidepanelText.includes("function collectLanguageOptionButtons()") &&
     sidepanelText.includes("function handleLanguageOptionsKeydown") &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(els.languageOptionsList, "hidden", true)') &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(els.languageOptionsList, "hidden", false)') &&
+    sidepanelText.includes('setAttributeValueIfChanged(els.languageSelectButton, "aria-expanded", "false")') &&
+    sidepanelText.includes('setAttributeValueIfChanged(els.languageSelectButton, "aria-expanded", "true")') &&
+    sidepanelText.includes("setTextContentIfChanged(els.languageSelectValue, selectedLabel)") &&
+    sidepanelText.includes("languageOptionButtons.forEach((button) =>") &&
+    sidepanelText.includes('const selected = languageOptionButtons.find((button) => button.getAttribute("aria-selected") === "true");') &&
+    sidepanelText.includes("const options = languageOptionButtons;") &&
+    sidepanelText.includes('setAttributeValueIfChanged(button, "aria-selected", selected ? "true" : "false")') &&
+    sidepanelText.includes('setNumericPropertyIfChanged(button, "tabIndex", selected ? 0 : -1)') &&
+    sidepanelText.includes('setNumericPropertyIfChanged(option, "tabIndex", index === nextIndex ? 0 : -1)') &&
+    sidepanelText.includes("setSourceHtmlIfChanged(els.languageSelect, selectHtml)") &&
+    sidepanelText.includes("setSourceHtmlIfChanged(els.languageOptionsList, optionsHtml)") &&
+    sidepanelText.includes("languageOptionButtons = collectLanguageOptionButtons();") &&
+    !sidepanelText.includes("els.languageOptionsList.hidden = true") &&
+    !sidepanelText.includes("els.languageOptionsList.hidden = false") &&
+    !sidepanelText.includes('els.languageSelectButton.setAttribute("aria-expanded", "false")') &&
+    !sidepanelText.includes('els.languageSelectButton.setAttribute("aria-expanded", "true")') &&
+    !sidepanelText.includes("els.languageSelectValue.textContent = selectedLabel") &&
+    !sidepanelText.includes('els.languageOptionsList.querySelectorAll("[data-language-option]").forEach') &&
+    !sidepanelText.includes('const selected = els.languageOptionsList.querySelector(\'[aria-selected="true"]\')') &&
+    !sidepanelText.includes('const options = Array.from(els.languageOptionsList.querySelectorAll("[data-language-option]"))') &&
+    !sidepanelText.includes('button.setAttribute("aria-selected", selected ? "true" : "false")') &&
+    !sidepanelText.includes("button.tabIndex = selected ? 0 : -1") &&
+    !sidepanelText.includes("option.tabIndex = index === nextIndex ? 0 : -1") &&
+    !sidepanelText.includes("els.languageSelect.innerHTML = options") &&
+    !sidepanelText.includes("els.languageOptionsList.innerHTML = options") &&
     sidepanelText.includes("i18n.languageOptions()") &&
     sidepanelCss.includes(".language-option") &&
     sidepanelCss.includes("text-align: center;") &&
@@ -932,8 +1486,8 @@ assert.ok(
     sidepanelText.includes("shared.toTraditionalChinese") &&
     sharedText.includes("function toTraditionalChinese") &&
     diagnosticsHtmlIncludesSharedFirst() &&
-    sidepanelText.includes('setLocalizedText(els.runPreflight, "Checking...")') &&
-    sidepanelText.includes('setLocalizedText(els.evidenceMeta, "No technical record saved yet.")') &&
+    sidepanelText.includes('setLocalizedTextIfChanged(els.runPreflight, "Checking...")') &&
+    sidepanelText.includes('setLocalizedTextIfChanged(els.evidenceMeta, "No technical record saved yet.")') &&
     sidepanelText.includes("localizeInterpolated(\"Local image folder setup failed: {error}\""),
   "side panel language selection should support auto and global languages while keeping dynamic status text localized"
 );
@@ -959,6 +1513,12 @@ assert.ok(
     sidepanelText.includes("function queueItemMediaSummary") &&
     sidepanelText.includes("function queueItemExcerpt") &&
     sidepanelText.includes("function queueItemDisplayTitle") &&
+    sidepanelText.includes("function queueItemById(id)") &&
+    sidepanelText.includes("function activeQueueItem()") &&
+    sidepanelText.includes("function clearMissingActiveQueueItem()") &&
+    sidepanelText.includes("return id ? draftQueue.find((item) => item.id === id) || null : null;") &&
+    sidepanelText.includes("const activeItem = activeQueueItem();") &&
+    sidepanelText.includes("clearMissingActiveQueueItem();") &&
     sidepanelText.includes("function renderQueueItemMeta") &&
     sidepanelText.includes('data-media="${safe(mediaSummary.tone)}"') &&
     sidepanelText.includes('class="draft-queue-excerpt"') &&
@@ -966,12 +1526,21 @@ assert.ok(
     sidepanelMessagesText.includes('"Too many images: remove {extra}"') &&
     sidepanelText.includes("media.tone === \"danger\"") &&
     sidepanelText.includes("formatCompactCount(total, { zhTenThousand: false })") &&
+    sidepanelText.includes("setLocalizedTextIfChanged(els.draftQueueMeta, queueSummaryText())") &&
+    sidepanelText.includes("setSourceHtmlIfChanged(els.draftQueueList, \"\")") &&
+    sidepanelText.includes("const queueHtml = draftQueue.map((item, index) =>") &&
+    sidepanelText.includes("if (setSourceHtmlIfChanged(els.draftQueueList, queueHtml)) translateDynamicDom(els.draftQueue);") &&
     sidepanelText.includes("draft-queue-copy") &&
     sidepanelText.includes("draft-queue-remove") &&
     sidepanelText.includes("function removeDraftQueueItem") &&
     sidepanelText.includes('data-queue-action="remove"') &&
     sidepanelMessagesText.includes('"Remove draft"') &&
     sidepanelMessagesText.includes('"Queued draft removed."') &&
+    !sidepanelText.includes("els.draftQueueList.innerHTML = \"\"") &&
+    !sidepanelText.includes("els.draftQueueList.innerHTML = draftQueue.map") &&
+    !sidepanelText.includes("els.draftQueueMeta) setLocalizedText(els.draftQueueMeta") &&
+    !sidepanelText.includes("!draftQueue.some((item) => item.id === activeQueueItemId)") &&
+    !sidepanelText.includes("!draftQueue.some((entry) => entry.id === activeQueueItemId)") &&
     !sidepanelText.includes('class="record-icon-action draft-queue-edit"') &&
     !sidepanelText.includes('class="draft-queue-source"') &&
     !sidepanelText.includes('"Source: {name}"') &&
@@ -1037,7 +1606,7 @@ assert.ok(
       mainWorldText.includes("upload.coverOnly && !coverUpload") &&
       mainWorldText.includes("coverUpload?.coverOnly && coverUpload.blockKey") &&
       !mainWorldText.includes("coverUpload?.blockKey && (coverUpload.coverOnly || summary.cover.graphql?.ok)") &&
-      mainWorldText.includes("if (!String(text || \"\")) return deleteBlockByKey(draftNode, blockKey).ok;") &&
+      mainWorldText.includes("if (!nextText.trim()) return deleteBlockByKey(draftNode, blockKey).ok;") &&
       sidepanelText.includes("Title is set first; body images keep Markdown order, and the cover is matched after upload.") &&
       sidepanelText.includes("Setting article title and matching cover after ordered uploads.") &&
       !sidepanelText.includes("Setting the title and cover after the body import."),
@@ -1096,35 +1665,76 @@ assert.ok(
       "function editorStatsText",
       "function updateDraftEditorStatus",
       "function updateEditorModeToggle",
-      "button.disabled = !isEdit || queueModeActive()",
+      "function collectEditorCommandButtons(toolbar)",
+      "const draftEditorCommandButtons = collectEditorCommandButtons(els.draftEditorToolbar);",
+      "const recordEditCommandButtons = collectEditorCommandButtons(els.recordEditToolbar);",
+      'setDatasetValueIfChanged(button, "nextMode", nextMode)',
+      'setAttributeValueIfChanged(button, "aria-pressed", isRead ? "true" : "false")',
+      'setAttributeValueIfChanged(button, "title", localizeText(nextLabel))',
+      "setLocalizedTextIfChanged(els.draftEditorStats, editorStatsText(text, markdownSegmentCounts(text)))",
+      "syncVisibilityState(els.draftEditorInputWrap, isPreview || hasQueue)",
+      "draftEditorCommandButtons.forEach((button) =>",
+      "setBooleanPropertyIfChanged(button, \"disabled\", !isEdit || hasQueue)",
       "function setDraftText(markdown",
+      'setPropertyValueIfChanged(els.markdown, "value", text)',
       "else if (draftText().trim()) scheduleAnalyzeDraft(STARTUP_DRAFT_ANALYZE_DELAY_MS);",
       "function handleDraftEditorInput",
       "function setDraftEditorMode",
       "function updateDraftEditorModeToggle",
       "function updateDraftEditorDensity",
+      "function countMeaningfulMarkdownLines(text)",
+      "const meaningfulLines = countMeaningfulMarkdownLines(value);",
       "function plainDraftSyntaxText",
       "function renderMarkdownSyntaxHighlight",
       "function renderDraftSyntaxHighlight",
       "SYNTAX_HIGHLIGHT_DETAIL_LIMIT",
-      "target.textContent = value;",
+      "setTextContentIfChanged(target, value);",
+      "setSourceHtmlIfChanged(target, html);",
+      "setTextContentIfChanged(els.draftSyntaxHighlight, value);",
       "function highlightInlineMarkdownSyntax",
       "function syncDraftSyntaxScroll",
+      "function syncScrollPositionIfChanged(target, source)",
+      'syncScrollPositionIfChanged(els.draftSyntaxHighlight, els.markdown)',
       'els.markdown.addEventListener("scroll", syncDraftSyntaxScroll)',
       "if (length) parts.push(formatCompactUnit(length, \"char\", \"chars\", \"字符\"));",
       "editorStatsText(text, markdownSegmentCounts(text))",
       "function translateVisibleWorkspace()",
       "translateVisibleWorkspace();",
-      "translateDynamicDom(panel)",
+      "translateDynamicDom(panel, { syncEnvironment: false })",
+      "function setClassPresenceIfChanged(node, className, present)",
+      "function acknowledgeDraftInput()",
+      'setClassPresenceIfChanged(target, "draft-ack", false)',
+      'setClassPresenceIfChanged(target, "draft-ack", true)',
+      'const workspaceTabs = [...document.querySelectorAll(".tab")]',
+      'const workspacePanels = [...document.querySelectorAll(".panel")]',
+      'const workspaceTopbar = document.querySelector(".topbar")',
+      'const workspaceTabsContainer = document.querySelector(".tabs")',
+      "translateDynamicDom(workspaceTopbar || document.body, { syncEnvironment: false })",
+      "translateDynamicDom(workspaceTabsContainer || document.body, { syncEnvironment: false })",
+      'if (panel.classList.contains("active")) translateDynamicDom(panel, { syncEnvironment: false });',
+      "let activeTabIndex = -1",
+      "const isActive = tab.dataset.tab === target;",
+      "if (isActive) activeTabIndex = index;",
+      'setStylePropertyIfChanged(workspaceTabsContainer, "--tab-count", Math.max(workspaceTabs.length, 1))',
+      'setClassPresenceIfChanged(tab, "active", isActive)',
+      'setClassPresenceIfChanged(panel, "active", isActive)',
+      'setClassPresenceIfChanged(els.draftPanel, "drag-active", true)',
+      'setClassPresenceIfChanged(els.draftPanel, "drag-active", false)',
+      "workspaceTabs.forEach((tab) =>",
       "function formatCompactNumber",
       'const tenThousandUnit = currentLanguage === "zh-TW" ? "萬" : "万";',
-      'els.draftPanel.dataset.queueMode = hasQueue ? "true" : "false";',
-      "els.draftEditorShell.hidden = hasQueue",
-      'els.draftEditorShell.dataset.density = isCompact ? "compact" : "roomy";',
+      'setDatasetValueIfChanged(els.draftPanel, "queueMode", hasQueue ? "true" : "false")',
+      'setBooleanPropertyIfChanged(els.draftEditorShell, "hidden", hasQueue)',
+      'setDatasetValueIfChanged(els.draftEditorShell, "density", isCompact ? "compact" : "roomy")',
       "function runWhenIdle(callback, timeout = STARTUP_IDLE_TIMEOUT_MS)",
       "function restoreSingleDraftMarkdown(markdown, { analyze = true } = {})",
       "setDraftText(text, { preview: false, syntax: \"defer\" });",
       "function scheduleDraftSyntaxHighlight",
+      'setDatasetValueIfChanged(els.draftInlinePreview, "previewMode", "read")',
+      'setLocalizedTextIfChanged(els.draftInlinePreviewTitle, "Reading preview")',
+      'setLocalizedTextIfChanged(els.draftInlinePreviewMeta, "Paste Markdown to read it here.")',
+      "setSourceHtmlIfChanged(els.draftInlinePreviewBody, emptyMarkdownPreviewHtml())",
+      "setSourceHtmlIfChanged(els.draftInlinePreviewBody, markdownPreviewHtml(text))",
       "function paintStartupShell",
       "function restoreStartupState",
       "function startupStorage",
@@ -1141,6 +1751,7 @@ assert.ok(
       'if (target === "records") {',
       "void ensureRecordHistoryRestored({ render: true }).then(() =>",
       "syncRecordPanel({ translate: true });",
+      'setBooleanPropertyIfChanged(details, "open", true)',
       "function updateInlinePreview",
       "function updateRecordEditorMode",
       "function updateRecordEditPreview",
@@ -1158,7 +1769,34 @@ assert.ok(
       'isChineseLanguage() ? "m" : "M"',
       "window.xPosterCodeMirror",
       "lineNumbers",
-      "return importMarkdownDraft(els.markdown.value)"
+      "if (els.markdown && els.markdown.value !== text) els.markdown.value = text",
+      "return importMarkdownDraft(els.markdown.value)",
+      'tab.classList.toggle("active", index === activeTabIndex)',
+      'panel.classList.toggle("active", isActive)',
+      'els.draftPanel.classList.add("drag-active")',
+      'els.draftPanel.classList.remove("drag-active")',
+      'target.classList.remove("draft-ack")',
+      'target.classList.add("draft-ack")',
+      "details.open = true",
+      'const tabs = [...document.querySelectorAll(".tab")]',
+      'document.querySelectorAll(".panel").forEach((panel) =>',
+      'document.querySelectorAll(".tab").forEach((tab) =>',
+      'translateDynamicDom(document.querySelector(".topbar") || document.body)',
+      'translateDynamicDom(document.querySelector(".tabs") || document.body)',
+      'document.querySelectorAll(".panel.active").forEach((panel) => translateDynamicDom(panel))',
+      ".forEach((panel) => translateDynamicDom(panel));",
+      'els.draftEditorToolbar?.querySelectorAll("[data-editor-command]")',
+      'els.recordEditToolbar?.querySelectorAll("[data-editor-command]")',
+      "els.draftInlinePreviewBody.innerHTML = emptyMarkdownPreviewHtml()",
+      "els.draftInlinePreviewBody.innerHTML = markdownPreviewHtml(text)",
+      "value.split(/\\r\\n?|\\n/).filter((line) => line.trim()).length",
+      "target.textContent = value;",
+      "target.innerHTML = html;",
+      "els.draftSyntaxHighlight.scrollTop = els.markdown.scrollTop",
+      "els.draftSyntaxHighlight.scrollLeft = els.markdown.scrollLeft",
+      'els.draftInlinePreview.dataset.previewMode = "read"',
+      'els.draftEditorShell.dataset.density = isCompact ? "compact" : "roomy";',
+      "setLocalizedText(els.draftEditorStats, editorStatsText(text, markdownSegmentCounts(text)))"
     ]) &&
     includesAll(sidepanelCss, [
       ".draft-editor-toolbar",
@@ -1168,6 +1806,10 @@ assert.ok(
       "--draft-editor-roomy-block-size: clamp(220px, calc(100dvh - 276px), 390px);",
       "--draft-editor-compact-block-size: clamp(148px, calc(100dvh - 276px), 208px);",
       ".draft-editor-shell[data-density=\"compact\"]",
+      "--draft-editor-focus-line: transparent;",
+      "--draft-editor-field:",
+      "border: 0;",
+      ".draft-editor-shell:focus-within",
       ".panel.active {\n  min-height: 0;\n  display: grid;\n  align-self: stretch;",
       "align-content: stretch;",
       "grid-template-rows: auto auto minmax(0, 1fr) auto;",
@@ -1187,6 +1829,9 @@ assert.ok(
       "#markdown {\n  position: relative;\n  z-index: 1;",
       "color: var(--ink);",
       "caret-color: var(--ink);",
+      "#markdown:focus",
+      "caret-color: var(--signal-text);",
+      ".draft-editor-input-wrap:focus-within",
       ".draft-syntax-highlight {\n  position: absolute;\n  inset: 0;\n  color:",
       "display: none;",
       ".draft-token-heading",
@@ -1212,6 +1857,13 @@ assert.ok(
       "height: var(--draft-editor-block-size);",
       "min-height: var(--draft-editor-block-size);",
       "max-height: var(--draft-editor-block-size);",
+      "--draft-editor-focus-ring:",
+      "--draft-editor-focus-field-line:",
+      "--draft-editor-frame-line:",
+      "--draft-editor-frame-hover-line:",
+      "border: 1px solid var(--draft-editor-frame-line);",
+      "box-shadow: inset 0 0 0 1px var(--draft-editor-focus-ring);",
+      "box-shadow: inset 0 1px 0 var(--draft-editor-focus-field-line);",
       ".panel.active {\n  min-height: 0;\n  display: grid;\n  align-self: start;",
       ".composer {\n  position: relative;\n  min-height: 0;",
       ".composer {\n  position: relative;\n  height: 100%;\n  min-height: 0;\n  align-self: stretch;\n  align-content: start;",
@@ -1231,12 +1883,33 @@ assert.ok(
     sidepanelText.includes('label: "No Markdown yet"') &&
     sidepanelText.includes('const needsMarkdown = !hasDraft && !hasQueue;') &&
     sidepanelText.includes("lastWriteButtonContentReady") &&
-    sidepanelText.includes('button.dataset.reveal = "write-ready"') &&
+    sidepanelText.includes("function importButtonLabelNode()") &&
+    sidepanelText.includes('setDatasetValueIfChanged(actions, "empty", hasDraft || hasQueue || busy || batchWriting ? "false" : "true")') &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(button, "disabled", disabled)') &&
+    sidepanelText.includes('setAttributeValueIfChanged(button, "aria-disabled", disabled ? "true" : "false")') &&
+    sidepanelText.includes("setImportButtonLabel(label)") &&
+    sidepanelText.includes('setDatasetValueIfChanged(button, "reveal", "write-ready")') &&
+    sidepanelText.includes('removeDatasetValueIfChanged(button, "reveal")') &&
     sidepanelText.includes('text: "Paste in the editor above, or choose a .md file."') &&
     sidepanelText.includes('return { hidden: true, tone: "ready", text: "" };') &&
     sidepanelText.includes("applyImportHint(hint)") &&
-    sidepanelText.includes("els.importHint.hidden = hidden") &&
-    sidepanelText.includes('els.importHint.setAttribute("aria-hidden", hidden ? "true" : "false")') &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(els.importHint, "hidden", hidden)') &&
+    sidepanelText.includes('setAttributeValueIfChanged(els.importHint, "aria-hidden", hidden ? "true" : "false")') &&
+    sidepanelText.includes('setDatasetValueIfChanged(els.importHint, "tone", hint.tone || "ready")') &&
+    sidepanelText.includes("setLocalizedTextIfChanged(els.importHint, hint.text || \"\")") &&
+    !sidepanelText.includes('button.dataset.reveal = "write-ready"') &&
+    !sidepanelText.includes("els.importHint.hidden = hidden") &&
+    !sidepanelText.includes('els.importHint.setAttribute("aria-hidden", hidden ? "true" : "false")') &&
+    sidepanelText.includes("function collectImportDraftNodes()") &&
+    sidepanelText.includes("const importDraftNodes = collectImportDraftNodes();") &&
+    sidepanelText.includes("if (importDraftNodes.label?.isConnected) return importDraftNodes.label;") &&
+    sidepanelText.includes("setSourceHtmlIfChanged(button, `${importDraftNodes.iconMarkup}<span></span>`)") &&
+    sidepanelText.includes('importDraftNodes.label = button.lastElementChild?.tagName === "SPAN" ? button.lastElementChild : null;') &&
+    !sidepanelText.includes("els.importDraft.innerHTML = `${svg}<span></span>`") &&
+    !sidepanelText.includes('let labelNode = button.querySelector("span")') &&
+    !sidepanelText.includes('importDraftNodes.label = button.querySelector("span")') &&
+    !sidepanelText.includes('const svg = button.querySelector("svg")') &&
+    !sidepanelText.includes("translateDynamicDom(actions || button)") &&
     sidepanelCss.includes(".actions:not([data-empty=\"true\"]) .primary[data-reveal=\"write-ready\"]") &&
     sidepanelCss.includes("@keyframes xposter-write-ready-reveal") &&
     sidepanelCss.includes("@keyframes xposter-write-ready-icon"),
@@ -1251,25 +1924,553 @@ assert.ok(
     sidepanelCss.includes(".draft-drop-target") &&
     sidepanelCss.includes(".composer.drag-active .draft-drop-target") &&
     sidepanelCss.includes(".composer.drag-active .actions") &&
-    sidepanelCss.includes("color-mix(in oklch, var(--signal), var(--paper) 94%)") &&
+    sidepanelCss.includes("background: color-mix(in oklch, var(--signal), var(--paper) 96%);") &&
     sidepanelCss.includes("xposter-drop-breathe 1.8s ease-in-out infinite") &&
     sidepanelCss.includes("0 0 0 6px color-mix(in oklch, var(--signal), transparent 92%)") &&
     sidepanelCss.includes("transform: scale(1.006)") &&
-    sidepanelCss.includes(".composer.drag-active .actions {\n  border-color: color-mix(in oklch, var(--signal), var(--line) 52%);\n  background:") &&
+    sidepanelCss.includes(".composer.drag-active .actions {\n  border-color: color-mix(in oklch, var(--signal), var(--line) 52%);\n  background: color-mix(in oklch, var(--signal), var(--paper) 96%);") &&
     sidepanelCss.includes("xposter-queue-item-enter") &&
     sidepanelCss.includes(".draft-queue-item[data-status=\"writing\"] .draft-queue-index") &&
     sidepanelText.includes("function markQueueItemsEntered") &&
-    sidepanelText.includes('els.targetReady.textContent = localizeText(target)') &&
+    sidepanelText.includes('setLocalizedTextIfChanged(els.targetReady, target)') &&
+    sidepanelText.includes('setLocalizedTextIfChanged(els.editorReady, editor)') &&
+    sidepanelText.includes('setLocalizedTextIfChanged(els.vaultReady, vault)') &&
     sidepanelMessagesText.includes("Preparing Markdown, images, and the X editor.") &&
     sidepanelPatternsText.includes("Article written(?: in (.+))?") &&
+    !sidepanelCss.includes("linear-gradient(") &&
+    !sidepanelCss.includes("radial-gradient(") &&
+    !sidepanelCss.includes("conic-gradient(") &&
     !sidepanelCss.includes(".composer.drag-active::before") &&
     !sidepanelCss.includes(".composer.drag-active::after"),
   "drag, queue, and readiness feedback should use real elements with restrained localized motion instead of fragile pseudo-elements"
 );
 assert.ok(
+  sidepanelText.includes('setDatasetValueIfChanged(els.draftDropStatus, "tone", tone)') &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(els.draftDropStatus, "hidden", false)') &&
+    sidepanelText.includes('setAttributeValueIfChanged(els.draftDropStatus, "role", "alert")') &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(els.draftDropDismiss, "hidden", false)') &&
+    sidepanelText.includes("const draftDropStatusNodes = collectDraftDropStatusNodes();") &&
+    sidepanelText.includes("setLocalizedTextIfChanged(draftDropStatusNodes.title, title)") &&
+    sidepanelText.includes("setLocalizedTextIfChanged(draftDropStatusNodes.detail, detail)") &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(els.draftDropStatus, "hidden", true)') &&
+    sidepanelText.includes('setDatasetValueIfChanged(els.draftDropStatus, "tone", "idle")') &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(els.draftDropDismiss, "hidden", true)') &&
+    !sidepanelText.includes("els.draftDropStatus.dataset.tone = tone") &&
+    !sidepanelText.includes("els.draftDropStatus.hidden = false") &&
+    !sidepanelText.includes('els.draftDropStatus.setAttribute("role", "alert")') &&
+    !sidepanelText.includes("els.draftDropDismiss) els.draftDropDismiss.hidden = false") &&
+    !sidepanelText.includes("titleNode.textContent = title") &&
+    !sidepanelText.includes("detailNode.textContent = detail") &&
+    !sidepanelText.includes("const titleNode = els.draftDropStatus.querySelector") &&
+    !sidepanelText.includes("const detailNode = els.draftDropStatus.querySelector") &&
+    !sidepanelText.includes("translateDynamicDom(els.draftDropStatus)") &&
+    !sidepanelText.includes("els.draftDropStatus.hidden = true"),
+  "draft drop error status should update only changed attributes, visibility, and localized text"
+);
+assert.ok(
   sidepanelText.includes("const leftWindow = (event)") &&
     !sidepanelText.includes("let dragDepth"),
   "drop activation should not depend on fragile child-element drag depth"
+);
+assert.ok(
+  sidepanelText.includes("function setClassNameIfChanged(node, value)") &&
+    sidepanelText.includes("function setAttributeValueIfChanged(node, attribute, value)") &&
+    sidepanelText.includes("function syncVisibilityState(node, hidden)") &&
+    sidepanelText.includes('setAttributeValueIfChanged(node, "aria-hidden", hidden ? "true" : "false")') &&
+    sidepanelText.includes('setAttributeValueIfChanged(els.markdown, "aria-hidden", isPreview || hasQueue ? "true" : "false")') &&
+    sidepanelText.includes('setNumericPropertyIfChanged(els.markdown, "tabIndex", isPreview || hasQueue ? -1 : 0)') &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(els.draftQueue, "hidden", !hasQueue)') &&
+    sidepanelText.includes('const pageStateLabel = els.pageState?.querySelector("span") || els.pageState || null;') &&
+    sidepanelText.includes("setLocalizedTextIfChanged(pageStateLabel, text)") &&
+    !sidepanelText.includes("els.draftEditorInputWrap.hidden = isPreview || queueModeActive()") &&
+    !sidepanelText.includes("els.draftEditorShell.hidden = hasQueue") &&
+    !sidepanelText.includes("button.disabled = !isEdit || queueModeActive()") &&
+    sidepanelText.includes('setDatasetValueIfChanged(els.pageState, "pageAction", action)') &&
+    sidepanelText.includes("setClassNameIfChanged(els.pageState, `page-state ${tone || \"\"}`)") &&
+    sidepanelText.includes('setAttributeValueIfChanged(els.pageState, "aria-label", localizedTitle)') &&
+    sidepanelText.includes('setDatasetValueIfChanged(els.targetContextPanel, "tone", tone)') &&
+    sidepanelText.includes('setLocalizedTextIfChanged(els.targetContextState, toneLabel(tone))') &&
+    sidepanelText.includes("setLocalizedTextIfChanged(els.targetContextMeta, !target.available"),
+  "polled page and target context status should avoid redundant DOM writes while preserving the same visible state"
+);
+assert.ok(
+    sidepanelText.includes("const conversionMapItems = indexElementsByData(els.conversionMapList, \"data-map\");") &&
+    sidepanelText.includes("const preflightItems = indexElementsByData(els.preflightList, \"data-check\");") &&
+    sidepanelText.includes("function indexChildElementByData(items, selector)") &&
+    sidepanelText.includes('const preflightActionButtons = indexChildElementByData(preflightItems, "button[data-preflight-action]");') &&
+    sidepanelText.includes("const timelineItems = indexElementsByData(els.timelineList, \"data-timeline-step\");") &&
+    sidepanelText.includes("const liveRunbookItems = indexElementsByData(els.liveRunbookList, \"data-runbook-step\");") &&
+    sidepanelText.includes('const liveRunbookActionButtons = indexChildElementByData(liveRunbookItems, "button[data-runbook-action]");') &&
+    sidepanelText.includes("const proofDeckItems = indexElementsByData(els.proofDeckList, \"data-proof\");") &&
+    sidepanelText.includes("const completionAuditItems = indexElementsByData(els.completionAuditList, \"data-audit\");") &&
+    sidepanelText.includes('const conversionMapSection = els.conversionMapList?.closest("section") || null;') &&
+    sidepanelText.includes('const importLedgerSection = els.importLedgerList?.closest("section") || null;') &&
+    sidepanelText.includes('const reviewSection = els.reviewList?.closest("section") || null;') &&
+    sidepanelText.includes('const issueQueueSection = els.issueQueueList?.closest("section") || null;') &&
+    sidepanelText.includes('const timelineSection = els.timelineList?.closest("section") || null;') &&
+    sidepanelText.includes('const liveRunbookSection = els.liveRunbookList?.closest("section") || null;') &&
+    sidepanelText.includes('const proofDeckSection = els.proofDeckList?.closest("section") || null;') &&
+    sidepanelText.includes('const completionAuditSection = els.completionAuditList?.closest("section") || null;') &&
+    sidepanelText.includes("const rowQueryCache = new WeakMap();") &&
+    sidepanelText.includes("function statusRowNodes(item)") &&
+    sidepanelText.includes("function countItemsByTone(items, tone)") &&
+    sidepanelText.includes("for (const item of items) {") &&
+    sidepanelText.includes("if (item?.tone === tone) count += 1;") &&
+    sidepanelText.includes("const nodes = statusRowNodes(item);") &&
+    sidepanelText.includes("const item = conversionMapItems.get(row.id);") &&
+    sidepanelText.includes("let ready = 0;") &&
+    sidepanelText.includes("let active = 0;") &&
+    sidepanelText.includes("if (row.tone === \"ok\" || row.tone === \"ready\") ready += 1;") &&
+    sidepanelText.includes("if (row.count > 0) active += 1;") &&
+    sidepanelText.includes("const item = preflightItems.get(check.id);") &&
+    sidepanelText.includes("const actionButton = preflightActionButtons.get(check.id);") &&
+    sidepanelText.includes("syncStatusRow(item, { tone: check.tone, label: check.label, detail: check.detail })") &&
+    sidepanelText.includes("setLocalizedTextIfChanged(\n      els.conversionMapMeta,") &&
+    sidepanelText.includes("syncStatusRow(item, {\n        tone: row.tone,\n        label: row.label,\n        detail: row.detail,\n        status: row.countLabel || String(row.count)") &&
+    sidepanelText.includes('setLocalizedTextIfChanged(els.importLedgerMeta, "Load Markdown to see what each block will become.")') &&
+    sidepanelText.includes("let blocked = 0;") &&
+    sidepanelText.includes("let waiting = 0;") &&
+    sidepanelText.includes("let direct = 0;") &&
+    sidepanelText.includes("let mediaLimit = 0;") &&
+    sidepanelText.includes('if (row.tone === "error") blocked += 1;') &&
+    sidepanelText.includes('if (row.tone === "warn") waiting += 1;') &&
+    sidepanelText.includes('if (row.path === "Write text") direct += 1;') &&
+    sidepanelText.includes('if (row.kind === "media-limit") mediaLimit += 1;') &&
+    sidepanelText.includes("const plannedRows = Math.max(0, rows.length - mediaLimit);") &&
+    sidepanelText.includes("if (setSourceHtmlIfChanged(els.importLedgerList, importLedgerHtml))") &&
+    sidepanelText.includes('setLocalizedTextIfChanged(els.reviewMeta, "Write Markdown to get publishing notes.")') &&
+    sidepanelText.includes("let reviewHtml = \"\";") &&
+    sidepanelText.includes("for (const note of notes) {") &&
+    sidepanelText.includes('if (note.tone === "error") blockers += 1;') &&
+    sidepanelText.includes('if (note.tone === "warn") warnings += 1;') &&
+    sidepanelText.includes("reviewHtml += `<li data-tone=") &&
+    sidepanelText.includes("if (setSourceHtmlIfChanged(els.reviewList, reviewHtml))") &&
+    sidepanelText.includes("const previewBodyChanged = setSourceHtmlIfChanged(") &&
+    sidepanelText.includes("const planChanged = renderPlanReadiness(parsed);") &&
+    sidepanelText.includes("if (previewBodyChanged || planChanged) translateDynamicDom(els.previewPanel);") &&
+    sidepanelText.includes('const planBreakdownDetail = els.planBreakdown?.querySelector("p") || null;') &&
+    sidepanelText.includes('setLocalizedTextIfChanged(planBreakdownDetail, "Load Markdown to see the plain-language import steps.")') &&
+    sidepanelText.includes("let textBlocks = 0;") &&
+    sidepanelText.includes('if (segment.type === "text") {\n        textBlocks += 1;\n      }') &&
+    sidepanelText.includes("let atomic = 0;") &&
+    sidepanelText.includes("let images = 0;") &&
+    sidepanelText.includes("for (const item of plan.plan) {") &&
+    sidepanelText.includes('if (item.op.type === "atomic") atomic += 1;') &&
+    sidepanelText.includes('if (item.op.type === "image") images += 1;') &&
+    sidepanelText.includes("const operationCounts = { atomic: 0, images: 0 };") &&
+    sidepanelText.includes("for (const item of operations) {") &&
+    sidepanelText.includes('if (item.type === "atomic") operationCounts.atomic += 1;') &&
+    sidepanelText.includes('if (item.type === "image") operationCounts.images += 1;') &&
+    sidepanelText.includes("atomic: operationCounts.atomic,") &&
+    sidepanelText.includes("images: operationCounts.images,") &&
+    sidepanelText.includes("return renderPlanBreakdown(plan, { atomic, images, local, textBlocks, readinessChanged });") &&
+    sidepanelText.includes("setLocalizedTextIfChanged(\n      planBreakdownDetail,") &&
+    sidepanelText.includes("const visibleStepLimit = 8;") &&
+    sidepanelText.includes("const totalSteps = 1 + plan.plan.length;") &&
+    sidepanelText.includes("const stepItemHtml = (kind, text) =>") &&
+    sidepanelText.includes("for (const item of plan.plan) {") &&
+    sidepanelText.includes("if (renderedSteps >= visibleStepLimit) break;") &&
+    sidepanelText.includes('stepsHtml += stepItemHtml("More", `${totalSteps - visibleStepLimit} more step(s) are hidden here but included during import.`);') &&
+    sidepanelText.includes("const visiblePreviewLimit = 18;") &&
+    sidepanelText.includes("for (let index = 0; index < parsed.segments.length && index < visiblePreviewLimit; index += 1)") &&
+    sidepanelText.includes("const segment = parsed.segments[index];") &&
+    sidepanelText.includes("return Boolean(summary.readinessChanged || setSourceHtmlIfChanged(els.planSteps, stepsHtml));") &&
+    !sidepanelText.includes("els.conversionMapMeta.textContent = parsed") &&
+    !sidepanelText.includes("els.importLedgerMeta.textContent =") &&
+    !sidepanelText.includes("els.importLedgerList.innerHTML = rows") &&
+    !sidepanelText.includes("els.importLedgerList.innerHTML +=") &&
+    !sidepanelText.includes("els.reviewMeta.textContent =") &&
+    !sidepanelText.includes("els.reviewList.innerHTML = notes") &&
+    !sidepanelText.includes('notes.filter((note) => note.tone === "error").length') &&
+    !sidepanelText.includes('notes.filter((note) => note.tone === "warn").length') &&
+    !sidepanelText.includes("const reviewHtml = notes\n      .map") &&
+    !sidepanelText.includes("els.previewBody.innerHTML =") &&
+    !sidepanelText.includes("els.planReadiness.innerHTML =") &&
+    !sidepanelText.includes('els.planBreakdown.querySelector("p")') &&
+    !sidepanelText.includes("els.planSteps.innerHTML =") &&
+    !sidepanelText.includes("els.planSteps.innerHTML +=") &&
+    !sidepanelText.includes("...plan.plan.map((item) =>") &&
+    !sidepanelText.includes(".slice(0, 8)\n      .map((step)") &&
+    !sidepanelText.includes("parsed.segments.slice(0, 18).map((segment)") &&
+    !sidepanelText.includes('rows.filter((row) => row.tone === "ok" || row.tone === "ready").length') &&
+    !sidepanelText.includes('rows.filter((row) => row.count > 0).length') &&
+    !sidepanelText.includes('rows.filter((row) => row.tone === "error").length') &&
+    !sidepanelText.includes('rows.filter((row) => row.tone === "warn").length') &&
+    !sidepanelText.includes('rows.filter((row) => row.path === "Write text").length') &&
+    !sidepanelText.includes('rows.filter((row) => row.kind === "media-limit").length') &&
+    !sidepanelText.includes('plan.plan.filter((item) => item.op.type === "atomic").length') &&
+    !sidepanelText.includes('plan.plan.filter((item) => item.op.type === "image").length') &&
+    !sidepanelText.includes('operations.filter((item) => item.type === "atomic").length') &&
+    !sidepanelText.includes('operations.filter((item) => item.type === "image").length') &&
+    !sidepanelText.includes('parsed.segments.filter((segment) => segment.type === "text").length') &&
+    !sidepanelText.includes("item.dataset.tone = row.tone") &&
+    !sidepanelText.includes('item.querySelector("strong").textContent = row.label') &&
+    !sidepanelText.includes('item.querySelector("span").textContent = row.detail') &&
+    !sidepanelText.includes('item.querySelector("em").textContent = row.countLabel || String(row.count)') &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(actionButton, "hidden", !check.action)') &&
+    sidepanelText.includes('setDatasetValueIfChanged(actionButton, "preflightAction", check.action || "")') &&
+    sidepanelText.includes("function updatePreflight(checks = buildPreflightChecks())") &&
+    sidepanelText.includes("const hasPlan = hasQueue || hasParsedDraft;") &&
+    sidepanelText.includes('if (check.tone === "ok") readyCount += 1;') &&
+    sidepanelText.includes('setLocalizedTextIfChanged(els.preflightMeta, `${readyCount}/${checks.length} checks ready`);') &&
+    sidepanelText.includes("const checks = buildPreflightChecks();\n    updatePreflight(checks);") &&
+    sidepanelText.includes("checks,") &&
+    sidepanelText.includes('const blockerCount = countItemsByTone(checks, "error");') &&
+    sidepanelText.includes('if (blockerCount) log(`Publishing check found ${blockerCount} blocker(s).`);') &&
+    sidepanelText.includes('blockers: countItemsByTone(evidence.checks, "error")') &&
+    sidepanelText.includes('const blockers = countItemsByTone(evidence.checks, "error");') &&
+    sidepanelText.includes("setLocalizedTextIfChanged(\n      els.issueQueueMeta,") &&
+    sidepanelText.includes("let issueQueueHtml = \"\";") &&
+    sidepanelText.includes("for (const issue of issues) {") &&
+    sidepanelText.includes('if (issue.tone === "error") blockers += 1;') &&
+    sidepanelText.includes('if (issue.tone === "warn") warnings += 1;') &&
+    sidepanelText.includes("const issues = [];") &&
+    sidepanelText.includes("for (const check of checks) {") &&
+    sidepanelText.includes('if (check.tone !== "error" && check.tone !== "warn") continue;') &&
+    sidepanelText.includes("issues.push(issueFromCheck(check));") &&
+    sidepanelText.includes("if (setSourceHtmlIfChanged(els.issueQueueList, issueQueueHtml))") &&
+    !sidepanelText.includes("els.issueQueueMeta.textContent = blockers") &&
+    !sidepanelText.includes("els.issueQueueList.innerHTML = issues") &&
+    !sidepanelText.includes('issues.filter((issue) => issue.tone === "error").length') &&
+    !sidepanelText.includes('issues.filter((issue) => issue.tone === "warn").length') &&
+    !sidepanelText.includes("const issueQueueHtml = issues\n      .map") &&
+    !sidepanelText.includes(".filter((check) => {\n        if (check.tone !== \"error\" && check.tone !== \"warn\") return false;") &&
+    !sidepanelText.includes(".map((check) => issueFromCheck(check))") &&
+    sidepanelText.includes("translateDynamicDom(els.preflightPanel)") &&
+    !sidepanelText.includes("translateDynamicDom();\n  }\n\n  function primaryImportAction") &&
+    sidepanelText.includes("const item = timelineItems.get(step.id);") &&
+    sidepanelText.includes('if (step.tone === "ok") done += 1;') &&
+    sidepanelText.includes('if (step.tone === "error") blocked += 1;') &&
+    sidepanelText.includes('if (step.tone === "ready") ready += 1;') &&
+    sidepanelText.includes("const item = liveRunbookItems.get(step.id);") &&
+    sidepanelText.includes('if (step.tone === "ok" || step.tone === "ready") ready += 1;') &&
+    sidepanelText.includes("const button = liveRunbookActionButtons.get(step.id);") &&
+    sidepanelText.includes("syncStatusRow(item, {\n        tone: step.tone,") &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(button, "disabled",') &&
+    sidepanelText.includes('setLocalizedTextIfChanged(els.liveRunbookMeta, `${ready}/${runbook.length} after-import steps ready.`);') &&
+    sidepanelText.includes("translateDynamicDom(conversionMapSection)") &&
+    sidepanelText.includes("translateDynamicDom(importLedgerSection)") &&
+    sidepanelText.includes("translateDynamicDom(reviewSection)") &&
+    sidepanelText.includes("translateDynamicDom(issueQueueSection)") &&
+    sidepanelText.includes("translateDynamicDom(timelineSection)") &&
+    sidepanelText.includes("translateDynamicDom(liveRunbookSection)") &&
+    sidepanelText.includes("translateDynamicDom(proofDeckSection)") &&
+    sidepanelText.includes("translateDynamicDom(completionAuditSection)") &&
+    sidepanelText.includes("const row = proofDeckItems.get(item.id);") &&
+    sidepanelText.includes("const row = completionAuditItems.get(item.id);") &&
+    sidepanelText.includes("ready,") &&
+    sidepanelText.includes('`${proof.ready}/${proof.items.length} publish steps ready.`') &&
+    sidepanelText.includes("for (const item of items) {") &&
+    sidepanelText.includes('if (item.tone === "ok" || item.tone === "ready") proven += 1;') &&
+    sidepanelText.includes('if (item.tone === "error") blocked += 1;') &&
+    sidepanelText.includes("syncStatusRow(row, { tone: item.tone, label: item.label, detail: item.detail })") &&
+    !sidepanelText.includes("els.conversionMapList.querySelector(`[data-map=\"") &&
+    !sidepanelText.includes("els.preflightList.querySelector(`[data-check=\"") &&
+    !sidepanelText.includes('item.querySelector("button[data-preflight-action]")') &&
+    !sidepanelText.includes('checks.filter((check) => check.tone === "ok").length') &&
+    !sidepanelText.includes("Boolean(shared.buildPastePlan(parsed.segments, previewImageMap(parsed), previewTableMap(parsed)).plan.length || parsed.segments.length)") &&
+    !sidepanelText.includes('buildPreflightChecks().filter((check) => check.tone === "error")') &&
+    !sidepanelText.includes('checks: buildPreflightChecks()') &&
+    !sidepanelText.includes('evidence.checks.filter((check) => check.tone === "error").length') &&
+    !sidepanelText.includes("els.timelineList.querySelector(`[data-timeline-step=\"") &&
+    !sidepanelText.includes('timeline.filter((step) => step.tone === "ok").length') &&
+    !sidepanelText.includes('timeline.filter((step) => step.tone === "error").length') &&
+    !sidepanelText.includes('timeline.filter((step) => step.tone === "ready").length') &&
+    !sidepanelText.includes('runbook.filter((step) => step.tone === "ok" || step.tone === "ready").length') &&
+    !sidepanelText.includes('proof.items.filter((item) => item.tone === "ok" || item.tone === "ready").length') &&
+    !sidepanelText.includes('const proven = items.filter((item) => item.tone === "ok" || item.tone === "ready").length') &&
+    !sidepanelText.includes('const blocked = items.filter((item) => item.tone === "error").length') &&
+    !sidepanelText.includes("els.liveRunbookList.querySelector(`[data-runbook-step=\"") &&
+    !sidepanelText.includes('item.querySelector("button[data-runbook-action]")') &&
+    !sidepanelText.includes("els.proofDeckList.querySelector(`[data-proof=\"") &&
+    !sidepanelText.includes("els.completionAuditList.querySelector(`[data-audit=\"") &&
+    !sidepanelText.includes('translateDynamicDom(els.conversionMapList.closest("section"))') &&
+    !sidepanelText.includes('translateDynamicDom(els.importLedgerList.closest("section"))') &&
+    !sidepanelText.includes('translateDynamicDom(els.reviewList.closest("section"))') &&
+    !sidepanelText.includes('translateDynamicDom(els.issueQueueList.closest("section"))') &&
+    !sidepanelText.includes('translateDynamicDom(els.timelineList.closest("section"))') &&
+    !sidepanelText.includes('translateDynamicDom(els.liveRunbookList.closest("section"))') &&
+    !sidepanelText.includes('translateDynamicDom(els.proofDeckList.closest("section"))') &&
+    !sidepanelText.includes('translateDynamicDom(els.completionAuditList.closest("section"))'),
+  "conversion map issue queue preflight and runbook refreshes should reuse changed-only status row updates and avoid full-document translation"
+);
+assert.ok(
+  sidepanelText.includes("function syncDraftInspectorMetrics(parsed = null, counts = shared.segmentCounts([]))") &&
+    sidepanelText.includes('setAttributeValueIfChanged(els.inspector, "data-has-draft", parsed ? "true" : "false")') &&
+    sidepanelText.includes('setTextContentIfChanged(els.titleMetric, parsed?.title || "None")') &&
+    sidepanelText.includes('setTextContentIfChanged(els.imageMetric, String(counts.image || 0))') &&
+    sidepanelText.includes('setTextContentIfChanged(els.tableMetric, String(counts.table || 0))') &&
+    sidepanelText.includes('setTextContentIfChanged(els.tweetMetric, String(counts.tweet || 0))') &&
+    sidepanelText.includes("syncDraftInspectorMetrics(null, latestCounts)") &&
+    sidepanelText.includes("syncDraftInspectorMetrics(parsed, counts)") &&
+    !sidepanelText.includes('els.inspector?.setAttribute("data-has-draft", "false")') &&
+    !sidepanelText.includes('els.inspector?.setAttribute("data-has-draft", "true")') &&
+    !sidepanelText.includes('els.titleMetric.textContent = "None"') &&
+    !sidepanelText.includes("els.titleMetric.textContent = parsed.title") &&
+    !sidepanelText.includes("els.imageMetric.textContent = String(counts.image || 0)") &&
+    !sidepanelText.includes("els.tableMetric.textContent = String(counts.table || 0)") &&
+    !sidepanelText.includes("els.tweetMetric.textContent = String(counts.tweet || 0)"),
+  "draft analysis should sync inspector metrics through one changed-only helper"
+);
+assert.ok(
+  sidepanelText.includes("function draftImageSummary(parsed = latestParsed)") &&
+    sidepanelText.includes("const imageSegments = [];") &&
+    sidepanelText.includes("const remoteImages = [];") &&
+    sidepanelText.includes("const localImages = localImageReferences(parsed);") &&
+    sidepanelText.includes("const absoluteLocalImages = [];") &&
+    sidepanelText.includes("for (const segment of parsed?.segments || []) {") &&
+    sidepanelText.includes('if (segment.type !== "image") continue;') &&
+    sidepanelText.includes("if (isRemoteHttpImageSource(segment.source)) remoteImages.push(segment);") &&
+    sidepanelText.includes("if (!coverInBody && coverSource && segment.source === coverSource) coverInBody = true;") &&
+    sidepanelText.includes("for (const item of localImages) {") &&
+    sidepanelText.includes("if (shared.isAbsoluteLocalImageSource(item.source)) absoluteLocalImages.push(item);") &&
+    sidepanelText.includes("const imageSummary = draftImageSummary(parsed);") &&
+    sidepanelText.includes("updateConversionMap(parsed, counts, { imageSummary });") &&
+    sidepanelText.includes("renderDraftReview(parsed, counts, { imageSummary });") &&
+    sidepanelText.includes("function updateConversionMap(parsed, counts = null, context = {})") &&
+    sidepanelText.includes("const rows = buildConversionMap(parsed, counts || (parsed ? shared.segmentCounts(parsed.segments) : shared.segmentCounts([])), context);") &&
+    sidepanelText.includes("function buildConversionMap(parsed, counts, context = {})") &&
+    sidepanelText.includes("function renderDraftReview(parsed, counts = null, context = {})") &&
+    sidepanelText.includes("const notes = buildDraftReview(parsed, counts || shared.segmentCounts(parsed.segments), context);") &&
+    sidepanelText.includes("function buildDraftReview(parsed, counts, context = {})") &&
+    sidepanelText.includes("const { localImages, remoteImages, absoluteLocalImages, coverInBody } = context.imageSummary || draftImageSummary(parsed);") &&
+    !sidepanelText.includes("updateConversionMap(parsed, counts);\n      updateImportLedger(parsed, counts);\n      renderDraftReview(parsed, counts);") &&
+    !sidepanelText.includes('const imageSegments = parsed?.segments?.filter((segment) => segment.type === "image") || []') &&
+    !sidepanelText.includes('const imageSegments = parsed.segments.filter((segment) => segment.type === "image")') &&
+    !sidepanelText.includes("const remoteImages = imageSegments.filter((segment) => isRemoteHttpImageSource(segment.source))") &&
+    !sidepanelText.includes("const absoluteLocalImages = localImages.filter((item) => shared.isAbsoluteLocalImageSource(item.source))") &&
+    !sidepanelText.includes("const coverInBody = Boolean(parsed?.cover && imageSegments.some((segment) => segment.source === parsed.cover))") &&
+    !sidepanelText.includes("const coverInBody = imageSegments.some((segment) => segment.source === parsed.cover);"),
+  "draft review and conversion map should share one image summary pass instead of repeating image filters"
+);
+assert.ok(
+  sidepanelText.includes("const remoteImageList = Array.isArray(context.parsedDrafts)") &&
+    sidepanelText.includes("? remoteHttpImageSegmentsForParsedDrafts(context.parsedDrafts)") &&
+    sidepanelText.includes("? remoteHttpImageSegmentsForMarkdowns(markdowns, importOptions)") &&
+    sidepanelText.includes("const remoteImages = remoteImageList.length;") &&
+    sidepanelText.includes("const remoteOrigins = remoteImageOriginsFromSegments(remoteImageList);") &&
+    !sidepanelText.includes("const remoteOrigins = markdowns ? remoteImageOriginsForMarkdowns(markdowns, importOptions) : remoteImageOrigins(parsed);"),
+  "preflight checks should derive remote origins from the already-collected remote image list"
+);
+assert.ok(
+  sidepanelText.includes("function indexPreflightChecks(checks)") &&
+    sidepanelText.includes("return new Map((checks || []).map((check) => [check.id, check]));") &&
+    sidepanelText.includes("function preflightEvidenceContext(checks, context = {})") &&
+    sidepanelText.includes("const { includePreviewPlan = true, ...baseContext } = context;") &&
+    sidepanelText.includes("liveResult: baseContext.liveResult || buildLiveResultEvidence()") &&
+    sidepanelText.includes('needsRemote: typeof baseContext.needsRemote === "boolean" ? baseContext.needsRemote : remoteHttpImageSegments(latestParsed).length > 0') &&
+    sidepanelText.includes("if (includePreviewPlan) evidenceContext.previewPlan = baseContext.previewPlan || buildPreviewPlan();") &&
+    sidepanelText.includes("const preflightContext = preflightEvidenceContext(checks, { byId });") &&
+    sidepanelText.includes("const gate = getImportGate(checks, preflightContext);") &&
+    sidepanelText.includes("updateLiveRunbook(checks, gate, preflightContext)") &&
+    sidepanelText.includes("updateProofDeck(checks, gate, preflightContext)") &&
+    sidepanelText.includes("updateCompletionAudit(checks, gate, preflightContext)") &&
+    sidepanelText.includes("updateRecoveryPanel(checks, gate, preflightContext)") &&
+    sidepanelText.includes("updateIssueQueue(checks, gate, preflightContext)") &&
+    sidepanelText.includes("updateExecutionTimeline(checks, gate, preflightContext)") &&
+    sidepanelText.includes("const byId = context.byId || indexPreflightChecks(resolvedChecks);") &&
+    sidepanelText.includes("const byId = context.byId || indexPreflightChecks(checks);") &&
+    sidepanelText.includes("const liveResult = context.liveResult || buildLiveResultEvidence();") &&
+    sidepanelText.includes("const plan = context.previewPlan || buildPreviewPlan();") &&
+    sidepanelText.includes("const evidenceContext = preflightEvidenceContext(checks, { byId });") &&
+    sidepanelText.includes("const gate = getImportGate(checks, evidenceContext);") &&
+    sidepanelText.includes("importPlan: evidenceContext.previewPlan") &&
+    sidepanelText.includes("liveResult: evidenceContext.liveResult") &&
+    sidepanelText.includes("proofDeck: buildProofDeckEvidence(checks, gate, evidenceContext)") &&
+    sidepanelText.includes("completionAudit: buildCompletionAuditEvidence(checks, gate, evidenceContext)") &&
+    sidepanelText.includes("recovery: buildRecoveryState(checks, gate, evidenceContext)") &&
+    sidepanelText.includes("updateLiveRunbook(checks, gate, evidenceContext)") &&
+    sidepanelText.includes("updateProofDeck(checks, gate, evidenceContext)") &&
+    sidepanelText.includes("updateCompletionAudit(checks, gate, evidenceContext)") &&
+    sidepanelText.includes("updateRecoveryPanel(checks, gate, evidenceContext)") &&
+    sidepanelText.includes("function syncProgressiveSectionVisibility(context = {})") &&
+    sidepanelText.includes("function updateProgressiveSections(context = {})") &&
+    sidepanelText.includes("syncProgressiveSectionVisibility(context)") &&
+    sidepanelText.includes("const liveResultContext = preflightEvidenceContext(checks, { byId, liveResult, includePreviewPlan: false });") &&
+    sidepanelText.includes("const gate = getImportGate(checks, liveResultContext);") &&
+    sidepanelText.includes("updateLiveRunbook(checks, gate, liveResultContext)") &&
+    sidepanelText.includes("updateProofDeck(checks, gate, liveResultContext)") &&
+    sidepanelText.includes("updateCompletionAudit(checks, gate, liveResultContext)") &&
+    sidepanelText.includes("updateRecoveryPanel(checks, gate, liveResultContext)") &&
+    sidepanelText.includes("updateProgressiveSections(liveResultContext)") &&
+    sidepanelText.includes("const localAssetBlocker = localAssetWriteBlocker(checks, { ...preflightContext, byId });") &&
+    !sidepanelText.includes("proofDeck: buildProofDeckEvidence(checks, gate, { byId })") &&
+    !sidepanelText.includes("completionAudit: buildCompletionAuditEvidence(checks, gate, { byId })") &&
+    !sidepanelText.includes("recovery: buildRecoveryState(checks, gate, { byId })") &&
+    !sidepanelText.includes("updateLiveRunbook(checks, gate, { byId })") &&
+    !/new Map\([^;\n]*(?:checks|resolvedChecks)\.map\(\(check\) => \[check\.id, check\]\)/.test(sidepanelText) &&
+    !sidepanelText.includes('checks.find((check) => check.id === "assets")'),
+  "preflight refreshes should reuse one shared evidence context across gate, issue, runbook, proof, audit, timeline, and local-asset checks"
+);
+assert.ok(
+  sidepanelText.includes('setLocalizedTextIfChanged(els.vaultState, "Choose from an active X page")') &&
+    sidepanelText.includes('setLocalizedTextIfChanged(els.vaultState, "Not configured")') &&
+    sidepanelText.includes("setLocalizedTextIfChanged(els.vaultState, `Selected: ${vault.name}`)") &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(els.clearVault, "disabled", !enabled)') &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(els.clearVaultSettings, "disabled", !enabled)') &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(els.runPreflight, "disabled", true)') &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(els.runPreflight, "disabled", false)') &&
+    sidepanelText.includes('setLocalizedTextIfChanged(els.runPreflight, "Check")') &&
+    sidepanelText.includes("translateDynamicDom(els.localImagesPanel)") &&
+    !sidepanelText.includes('els.vaultState.textContent = "Not configured"') &&
+    !sidepanelText.includes("els.vaultState.textContent = `Selected:") &&
+    !sidepanelText.includes("els.vaultDetail.textContent =") &&
+    !sidepanelText.includes("els.vaultSettingsText.textContent =") &&
+    !sidepanelText.includes('translateDynamicDom(document.querySelector(".vault"))') &&
+    !sidepanelText.includes("if (els.clearVault) els.clearVault.disabled = !enabled") &&
+    !sidepanelText.includes("if (els.clearVaultSettings) els.clearVaultSettings.disabled = !enabled") &&
+    !sidepanelText.includes("els.runPreflight.disabled = true") &&
+    !sidepanelText.includes("els.runPreflight.disabled = false"),
+  "vault and preflight status refreshes should use localized changed-only text and disabled writes"
+);
+assert.ok(
+  sidepanelText.includes("function setTextContentIfChanged(node, value)") &&
+    sidepanelText.includes("function setSourceHtmlIfChanged(node, html)") &&
+    sidepanelText.includes("function setStylePropertyIfChanged(node, property, value)") &&
+    sidepanelText.includes("if (node.nodeValue !== nextValue) node.nodeValue = nextValue;") &&
+    sidepanelText.includes("if (current !== translated) element.setAttribute(attr, translated);") &&
+    sidepanelText.includes("let activeTabIndex = -1;") &&
+    sidepanelText.includes("const isActive = tab.dataset.tab === target;") &&
+    sidepanelText.includes("if (isActive) activeTabIndex = index;") &&
+    sidepanelText.includes('setClassPresenceIfChanged(tab, "active", isActive)') &&
+    sidepanelText.includes('setStylePropertyIfChanged(workspaceTabsContainer, "--tab-count", Math.max(workspaceTabs.length, 1))') &&
+    sidepanelText.includes('setStylePropertyIfChanged(workspaceTabsContainer, "--tab-index", Math.max(activeTabIndex, 0))') &&
+    sidepanelText.includes('setDatasetValueIfChanged(workspaceTabsContainer, "activeTab", activeTabIndex >= 0 ? "true" : "false")') &&
+    sidepanelText.includes("const targetPanels = [];") &&
+    sidepanelText.includes("if (isActive) targetPanels.push(panel);") &&
+    sidepanelText.includes("targetPanels.forEach((panel) => translateDynamicDom(panel, { syncEnvironment: false }));") &&
+    sidepanelText.includes('setStyleValueIfChanged(panel, "animation", "none")') &&
+    sidepanelText.includes('setStyleValueIfChanged(panel, "animation", "")') &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(els.liveProgress, "hidden", !progressVisible)') &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(els.evidenceDetails, "hidden", !hasAnyRecord)') &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(els.recordsEmpty, "hidden", hasRecord)') &&
+    sidepanelText.includes('setDatasetValueIfChanged(els.runSummary, "tone", hasWarnings ? "warn" : "done")') &&
+    sidepanelText.includes("setTextContentIfChanged(els.summaryMessage, summarizeRunMessage(summary))") &&
+    sidepanelText.includes("setTextContentIfChanged(els.summaryElapsed, `${((summary.elapsedMs || 0) / 1000).toFixed(1)}s`)") &&
+    sidepanelText.includes("function log(message)") &&
+    sidepanelText.includes("setTextContentIfChanged(timeNode, time)") &&
+    sidepanelText.includes("setTextContentIfChanged(messageNode, message)") &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(els.activityPanel, "hidden", false)') &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(els.runSummary, "hidden", true)') &&
+    sidepanelText.includes("const liveResultInputItems = collectLiveResultInputItems();") &&
+    sidepanelText.includes("function collectLiveResultInputItems()") &&
+    sidepanelText.includes("return liveResultInputItems;") &&
+    sidepanelText.includes("let checked = 0;") &&
+    sidepanelText.includes("for (const { input, label, detail } of getLiveResultItems()) {") &&
+    sidepanelText.includes("if (item.checked) checked += 1;") &&
+    sidepanelText.includes("complete: items.length > 0 && checked === items.length") &&
+    sidepanelText.includes('for (const { input } of getLiveResultItems()) {\n      setBooleanPropertyIfChanged(input, "checked", Boolean((stored[STORAGE_LIVE_RESULT] || {})[input.dataset.liveCheck]));') &&
+    sidepanelText.includes("setTextContentIfChanged(\n      els.liveResultMeta,") &&
+    sidepanelText.includes("function liveResultStorageState(liveResult)") &&
+    sidepanelText.includes("return Object.fromEntries((liveResult?.items || []).map((item) => [item.id, Boolean(item.checked)]));") &&
+    sidepanelText.includes("function updateLiveResultMeta(liveResult = buildLiveResultEvidence())") &&
+    sidepanelText.includes("liveResultChecks = liveResultStorageState(liveResult);") &&
+    sidepanelText.includes("updateLiveResultMeta(liveResult);") &&
+    !sidepanelText.includes("liveResultChecks = Object.fromEntries(getLiveResultItems().map(({ input }) => [input.dataset.liveCheck, Boolean(input.checked)]));") &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(input, "checked", Boolean(liveResultChecks[input.dataset.liveCheck]))') &&
+    sidepanelText.includes('for (const { input } of getLiveResultItems()) setBooleanPropertyIfChanged(input, "checked", false)') &&
+    !sidepanelText.includes('workspaceTabsContainer.style.setProperty("--tab-count"') &&
+    !sidepanelText.includes('workspaceTabsContainer.style.setProperty("--tab-index"') &&
+    !sidepanelText.includes('workspaceTabsContainer.dataset.activeTab = activeTabIndex >= 0 ? "true" : "false"') &&
+    !sidepanelText.includes("const activeTabIndex = workspaceTabs.findIndex((tab) => tab.dataset.tab === target)") &&
+    !sidepanelText.includes('setClassPresenceIfChanged(tab, "active", index === activeTabIndex)') &&
+    !sidepanelText.includes("workspacePanels\n      .filter((panel) => panel.dataset.panel === target)") &&
+    !sidepanelText.includes('panel.style.animation = "none"') &&
+    !sidepanelText.includes('panel.style.animation = ""') &&
+    !sidepanelText.includes("if (els.liveProgress) els.liveProgress.hidden = !progressVisible") &&
+    !sidepanelText.includes("if (els.recordsEmpty) els.recordsEmpty.hidden = hasRecord") &&
+    !sidepanelText.includes("els.summaryMessage.textContent = summarizeRunMessage(summary)") &&
+    !sidepanelText.includes("if (els.runSummary) els.runSummary.hidden = true") &&
+    !sidepanelText.includes("timeNode.textContent = time") &&
+    !sidepanelText.includes("messageNode.textContent = message") &&
+    !sidepanelText.includes("if (els.activityPanel) els.activityPanel.hidden = false") &&
+    !sidepanelText.includes("els.liveResultMeta.textContent = result.complete") &&
+    !sidepanelText.includes("input.checked = Boolean(liveResultChecks[input.dataset.liveCheck])") &&
+    !sidepanelText.includes("checked: items.filter((item) => item.checked).length") &&
+    !sidepanelText.includes("complete: items.length > 0 && items.every((item) => item.checked)") &&
+    !sidepanelText.includes("for (const input of getLiveResultItems()) input.checked = false") &&
+    !sidepanelText.includes('return Array.from(els.liveResultList.querySelectorAll("input[data-live-check]"));') &&
+    !sidepanelText.includes("else if (els.draftMediaAlert?.dataset.tone) delete els.draftMediaAlert.dataset.tone") &&
+    !sidepanelText.includes("if (els.draftMediaAlertDetail.textContent !== text) els.draftMediaAlertDetail.textContent = text"),
+  "live progress records layout tabs and live result refreshes should avoid repeated hidden/text/style/checked writes"
+);
+assert.ok(
+  sidepanelText.includes('setDatasetValueIfChanged(els.draftPanel, "emptyDraft", hasDraft || queueModeActive() ? "false" : "true")') &&
+    sidepanelText.includes('setPropertyValueIfChanged(els.recordSearchInput, "value", recordSearchQuery)') &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(els.localImagesPanel, "hidden", !showLocalImages)') &&
+    sidepanelText.includes("function syncEvidenceRecordOutput(kind, evidence)") &&
+    sidepanelText.includes("syncEvidenceRecordOutput(kind, latestEvidence)") &&
+    sidepanelText.includes("syncEvidenceRecordOutput(latestEvidence.kind, latestEvidence)") &&
+    sidepanelText.includes('setLocalizedTextIfChanged(els.evidenceMeta, "No technical record saved yet.")') &&
+    sidepanelText.includes('setLocalizedTextIfChanged(els.evidenceText, "Run Check article or Write article to save a technical record.")') &&
+    sidepanelText.includes("setLocalizedTextIfChanged(els.evidenceText, source)") &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(els.copyEvidence, "disabled", true)') &&
+    sidepanelText.includes("setTextContentIfChanged(els.evidenceText, JSON.stringify(evidence, jsonSafeReplacer, 2))") &&
+    sidepanelText.includes('setLocalizedTextIfChanged(els.evidenceMeta, "Record package generated")') &&
+    sidepanelText.includes('setLocalizedTextIfChanged(els.evidenceMeta, "Publish summary generated")') &&
+    sidepanelText.includes("setTextContentIfChanged(els.evidenceText, text)") &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(els.copyEvidence, "disabled", false)') &&
+    !sidepanelText.includes("if (els.draftPanel) els.draftPanel.dataset.emptyDraft =") &&
+    !sidepanelText.includes("if (els.localImagesPanel) els.localImagesPanel.hidden = !showLocalImages") &&
+    !sidepanelText.includes("els.recordSearchInput.value = recordSearchQuery") &&
+    !sidepanelText.includes('setLocalizedText(els.evidenceMeta, "No technical record saved yet.")') &&
+    !sidepanelText.includes('setLocalizedText(els.evidenceText, "Run Check article or Write article to save a technical record.")') &&
+    !sidepanelText.includes('setLocalizedText(els.evidenceMeta, "Record package generated")') &&
+    !sidepanelText.includes('setLocalizedText(els.evidenceMeta, "Publish summary generated")') &&
+    !sidepanelText.includes("els.evidenceText.textContent = translateText(source)") &&
+    !sidepanelText.includes("els.evidenceText.textContent = JSON.stringify(latestEvidence, jsonSafeReplacer, 2)") &&
+    !sidepanelText.includes("els.evidenceText.textContent = text") &&
+    !sidepanelText.includes("els.copyEvidence.disabled = false") &&
+    !sidepanelText.includes("if (els.copyEvidence) els.copyEvidence.disabled = true"),
+  "draft brief progressive sections and evidence output should share changed-only state updates"
+);
+assert.ok(
+  sidepanelText.includes("function buildProofDeckEvidence(checks = null, gate = null, context = {})") &&
+    sidepanelText.includes("const byId = context.byId || indexPreflightChecks(resolvedChecks);") &&
+    sidepanelText.includes("const liveResult = context.liveResult || buildLiveResultEvidence();") &&
+    sidepanelText.includes('const needsRemote = typeof context.needsRemote === "boolean" ? context.needsRemote : remoteHttpImageSegments(latestParsed).length > 0;') &&
+    sidepanelText.includes("const historyDraftRecord = recordHistory.find(recordHasMarkdown) || null;") &&
+    sidepanelText.includes("const evidenceDraftRecord = !historyDraftRecord && recordHasMarkdown(latestEvidence)") &&
+    sidepanelText.includes("const draftRecord = historyDraftRecord || evidenceDraftRecord;") &&
+    sidepanelText.includes("const recordTitle = draftRecord ? recordDisplayTitle(draftRecord) : \"\";") &&
+    sidepanelText.includes("function updateProofDeck(checks = null, gate = null, context = {})") &&
+    sidepanelText.includes("setTextContentIfChanged(els.extensionPath, proof.extensionPath)") &&
+    !sidepanelText.includes("if (els.extensionPath) els.extensionPath.textContent = proof.extensionPath") &&
+    !sidepanelText.includes("const hasDraftRecord = Boolean(recordHistory.find(recordHasMarkdown) || recordHasMarkdown(latestEvidence))") &&
+    !sidepanelText.includes("recordDisplayTitle(recordHistory.find(recordHasMarkdown)"),
+  "proof deck refresh should avoid rewriting the extension path and reuse draft/remote evidence state"
+);
+assert.ok(
+  sidepanelText.includes("function buildCompletionAuditEvidence(checks = null, gate = null, context = {})") &&
+    sidepanelText.includes("const byId = context.byId || indexPreflightChecks(resolvedChecks);") &&
+    sidepanelText.includes("const liveResult = context.liveResult || buildLiveResultEvidence();") &&
+    sidepanelText.includes('const needsRemote = typeof context.needsRemote === "boolean" ? context.needsRemote : remoteHttpImageSegments(latestParsed).length > 0;') &&
+    sidepanelText.includes("const proof = buildProofDeckEvidence(resolvedChecks, resolvedGate, { ...context, byId, liveResult, needsRemote });") &&
+    !sidepanelText.includes("const proof = buildProofDeckEvidence(resolvedChecks, resolvedGate);\n    const hasImportEvidence") &&
+    !sidepanelText.includes('const proof = buildProofDeckEvidence(resolvedChecks, resolvedGate);\n    const hasImportEvidence = Boolean(latestEvidence?.kind?.startsWith("import"));') &&
+    !sidepanelText.includes("const needsRemote = remoteHttpImageSegments(latestParsed).length > 0;\n    const packageReady"),
+  "completion audit should share proof-deck context instead of recomputing live and remote evidence"
+);
+assert.ok(
+  sidepanelText.includes('setDatasetValueIfChanged(els.recoveryPanel, "tone", recovery.tone)') &&
+    sidepanelText.includes("setLocalizedTextIfChanged(els.recoveryMeta, recovery.meta)") &&
+    sidepanelText.includes("setLocalizedTextIfChanged(els.recoveryState, toneLabel(recovery.tone))") &&
+    sidepanelText.includes("if (setSourceHtmlIfChanged(els.recoveryList, recoveryHtml)) translateDynamicDom(els.recoveryPanel);") &&
+    sidepanelText.includes("function recoveryToneForItems(items = [])") &&
+    sidepanelText.includes("let hasWarn = false;") &&
+    sidepanelText.includes("let hasReady = false;") &&
+    sidepanelText.includes('if (item.tone === "error") return "error";') &&
+    sidepanelText.includes('if (item.tone === "warn") hasWarn = true;') &&
+    sidepanelText.includes('else if (item.tone === "ready") hasReady = true;') &&
+    sidepanelText.includes("const tone = recoveryToneForItems(items);") &&
+    !sidepanelText.includes("els.recoveryPanel.dataset.tone = recovery.tone") &&
+    !sidepanelText.includes("els.recoveryMeta.textContent = recovery.meta") &&
+    !sidepanelText.includes("els.recoveryState.textContent = toneLabel(recovery.tone)") &&
+    !sidepanelText.includes("els.recoveryList.innerHTML = recovery.items") &&
+    !sidepanelText.includes('items.some((item) => item.tone === "error")') &&
+    !sidepanelText.includes('items.some((item) => item.tone === "warn")') &&
+    !sidepanelText.includes('items.some((item) => item.tone === "ready")'),
+  "recovery refreshes should preserve dynamic translation while avoiding repeated panel and list DOM writes"
 );
 assert.ok(
   sidepanelCss.includes("padding-right: max(14px, env(safe-area-inset-right));") &&
@@ -1290,6 +2491,27 @@ assert.ok(
     sidepanelHtml.includes('id="recordEditModeToggle"') &&
     sidepanelHtml.includes('id="recordEditStats"') &&
     sidepanelHtml.includes('data-record-action="editor-command"') &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(els.recordEditSheet, "hidden", !open)') &&
+    sidepanelText.includes('setDatasetValueIfChanged(document.body, "modalOpen", open ? "true" : "false")') &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(els.recordEditStats, "hidden", !stats)') &&
+    sidepanelText.includes("setLocalizedTextIfChanged(els.recordEditStats, stats)") &&
+    sidepanelText.includes("if (setSourceHtmlIfChanged(els.recordEditPreviewBody, previewHtml))") &&
+    sidepanelText.includes('setDatasetValueIfChanged(els.recordEditBody, "mode", recordEditMode)') &&
+    sidepanelText.includes("syncVisibilityState(els.recordEditInputWrap, !isEdit)") &&
+    sidepanelText.includes('setAttributeValueIfChanged(els.recordEditTextarea, "aria-hidden", isEdit ? "false" : "true")') &&
+    sidepanelText.includes('setNumericPropertyIfChanged(els.recordEditTextarea, "tabIndex", isEdit ? 0 : -1)') &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(els.recordEditToolbar, "hidden", !isEdit)') &&
+    sidepanelText.includes("syncVisibilityState(els.recordEditPreview, isEdit)") &&
+    sidepanelText.includes('setDatasetValueIfChanged(els.recordEditPreview, "previewMode", "read")') &&
+    sidepanelText.includes("recordEditCommandButtons.forEach((button) =>") &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(button, "disabled", !isEdit)') &&
+    sidepanelText.includes("setLocalizedTextIfChanged(els.recordEditTitle, title)") &&
+    sidepanelText.includes("setLocalizedTextIfChanged(els.recordEditMeta, meta)") &&
+    sidepanelText.includes("setLocalizedTextIfChanged(els.recordEditPrimaryLabel, primaryLabel)") &&
+    sidepanelText.includes('setDatasetValueIfChanged(els.recordEditTextarea, "editorMode", mode)') &&
+    sidepanelText.includes('setPropertyValueIfChanged(els.recordEditTextarea, "value", value)') &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(els.recordEditWriteButton, "hidden", mode !== "queue")') &&
+    sidepanelText.includes('syncScrollPositionIfChanged(els.recordEditHighlight, els.recordEditTextarea)') &&
     sidepanelText.includes("els.recordEditTextarea?.addEventListener(\"input\", handleRecordEditorInput)") &&
     sidepanelText.includes("els.recordEditTextarea?.addEventListener(\"scroll\", syncRecordEditSyntaxScroll)") &&
     sidepanelText.includes("els.recordEditTextarea?.addEventListener(\"keydown\"") &&
@@ -1297,6 +2519,21 @@ assert.ok(
     sidepanelText.includes("function normalizePreviewLists") &&
     sidepanelText.includes("stripOrderedPreviewListMarker(item)") &&
     sidepanelText.includes("applyTextareaCommand(button.dataset.editorCommand") &&
+    !sidepanelText.includes("els.recordEditSheet.hidden = !open") &&
+    !sidepanelText.includes("els.recordEditStats.hidden = !stats") &&
+    !sidepanelText.includes("els.recordEditPreviewBody.innerHTML = text.trim()") &&
+    !sidepanelText.includes("els.recordEditInputWrap.hidden = !isEdit") &&
+    !sidepanelText.includes("els.recordEditToolbar.hidden = !isEdit") &&
+    !sidepanelText.includes("els.recordEditPreview.hidden = isEdit") &&
+    !sidepanelText.includes('els.recordEditPreview.dataset.previewMode = "read"') &&
+    !sidepanelText.includes("button.disabled = !isEdit") &&
+    !sidepanelText.includes("els.recordEditTitle.textContent = title") &&
+    !sidepanelText.includes("els.recordEditMeta.textContent = meta") &&
+    !sidepanelText.includes("els.recordEditPrimaryLabel.textContent = primaryLabel") &&
+    !sidepanelText.includes("els.recordEditHighlight.scrollTop = els.recordEditTextarea.scrollTop") &&
+    !sidepanelText.includes("els.recordEditHighlight.scrollLeft = els.recordEditTextarea.scrollLeft") &&
+    !sidepanelText.includes("els.recordEditTextarea.dataset.editorMode = mode") &&
+    !sidepanelText.includes("els.recordEditWriteButton.hidden = mode !== \"queue\"") &&
     !sidepanelCss.includes(".record-edit-sheet {\n    padding: 0;"),
   "record edit dialog should reuse Markdown syntax highlighting, formatting, preview, and a single stable action bar"
 );
@@ -1305,11 +2542,53 @@ assert.ok(
     sidepanelHtml.includes('id="successSoundOption"') &&
     sidepanelHtml.includes('id="successSoundStyle"') &&
     sidepanelHtml.includes("Show a brief celebration on the X page when X reports a completed write.") &&
+    sidepanelText.includes("const themeModeInputs = els.themeChoice ? [...els.themeChoice.querySelectorAll('input[name=\"themeMode\"]')] : [];") &&
+    sidepanelText.includes("themeModeInputs.forEach((input) => {") &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(input, "checked", input.value === currentThemeMode)') &&
+    sidepanelText.includes('setDatasetValueIfChanged(document.documentElement, "theme", resolvedTheme)') &&
+    sidepanelText.includes('setDatasetValueIfChanged(document.documentElement, "themeMode", currentThemeMode)') &&
+    sidepanelText.includes('setStyleValueIfChanged(document.documentElement, "colorScheme", resolvedTheme)') &&
+    sidepanelText.includes('setDatasetValueIfChanged(document.body, "theme", resolvedTheme)') &&
+    sidepanelText.includes('setDatasetValueIfChanged(document.body, "themeMode", currentThemeMode)') &&
+    sidepanelText.includes("function syncLanguageEnvironment()") &&
+    sidepanelText.includes("function translateDynamicDom(root = document.body, { syncEnvironment = true } = {})") &&
+    sidepanelText.includes("if (syncEnvironment) syncLanguageEnvironment();") &&
+    sidepanelText.includes("translateDynamicDom(workspaceTopbar || document.body, { syncEnvironment: false });") &&
+    sidepanelText.includes("translateDynamicDom(workspaceTabsContainer || document.body, { syncEnvironment: false });") &&
+    sidepanelText.includes('if (panel.classList.contains("active")) translateDynamicDom(panel, { syncEnvironment: false });') &&
+    sidepanelText.includes("targetPanels.forEach((panel) => translateDynamicDom(panel, { syncEnvironment: false }));") &&
+    sidepanelText.includes("syncLanguageEnvironment();") &&
+    sidepanelText.includes('setDatasetValueIfChanged(document.body, "language", currentLanguage)') &&
+    sidepanelText.includes('setDatasetValueIfChanged(document.body, "languagePreference", i18n?.preference?.() || currentLanguage)') &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(els.importTitleOption, "checked", importOptions.setTitle !== false)') &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(els.importCoverOption, "checked", importOptions.setCover !== false)') &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(els.articleExportOption, "checked", articleExportOptions.enabled !== false)') &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(els.confettiOption, "checked", successFeedbackOptions.confetti !== false)') &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(els.successSoundOption, "checked", successFeedbackOptions.sound !== false)') &&
+    sidepanelText.includes('setPropertyValueIfChanged(els.successSoundStyle, "value", successFeedbackOptions.soundStyle || "soft")') &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(els.successSoundStyle, "disabled", !soundEnabled)') &&
+    !sidepanelText.includes("input.checked = input.value === currentThemeMode") &&
+    !sidepanelText.includes("els.themeChoice.querySelectorAll('input[name=\"themeMode\"]').forEach") &&
+    !sidepanelText.includes("els.importTitleOption.checked = importOptions.setTitle !== false") &&
+    !sidepanelText.includes("els.importCoverOption.checked = importOptions.setCover !== false") &&
+    !sidepanelText.includes("els.articleExportOption.checked = articleExportOptions.enabled !== false") &&
+    !sidepanelText.includes("els.confettiOption.checked = successFeedbackOptions.confetti !== false") &&
+    !sidepanelText.includes("els.successSoundOption.checked = successFeedbackOptions.sound !== false") &&
+    !sidepanelText.includes("els.successSoundStyle.value = successFeedbackOptions.soundStyle || \"soft\"") &&
+    !sidepanelText.includes("els.successSoundStyle.disabled = !soundEnabled") &&
+    !sidepanelText.includes("document.documentElement.dataset.theme = resolvedTheme") &&
+    !sidepanelText.includes("document.documentElement.dataset.themeMode = currentThemeMode") &&
+    !sidepanelText.includes("document.documentElement.style.colorScheme = resolvedTheme") &&
+    !sidepanelText.includes("document.body.dataset.theme = resolvedTheme") &&
+    !sidepanelText.includes("document.body.dataset.themeMode = currentThemeMode") &&
+    !sidepanelText.includes("document.body.dataset.language = currentLanguage") &&
+    !sidepanelText.includes("document.body.dataset.languagePreference = i18n?.preference?.() || currentLanguage") &&
+    !/function translateVisibleWorkspace\(\) \{[\s\S]*?translateDynamicDom\([^;\n]+;\s*[\s\S]*?setDatasetValueIfChanged\(document\.body, "language"/.test(sidepanelText) &&
     !sidepanelHtml.includes('id="successSoundVolume"') &&
     !sidepanelHtml.includes('id="successSoundVolumeValue"') &&
     !sidepanelHtml.includes('data-i18n="Volume"') &&
     !sidepanelHtml.includes('id="testSuccessFeedback"'),
-  "settings should expose page celebration, sound, and sound style without volume or a feedback test control"
+  "settings and theme controls should expose the same options while avoiding repeated checkbox dataset and style writes"
 );
 assert.ok(
   sidepanelText.includes("if (!batch || draftQueue.length === 0)") &&

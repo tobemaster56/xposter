@@ -6,7 +6,7 @@
 
 xPoster 是一个免费开源的 Chrome 扩展，给习惯先写 Markdown、最后发到 X 的人用。它提供一个侧边栏暂存区，检查当前打开的 X Article 编辑器，把草稿、图片、表格和嵌入内容写入 X，保存可恢复记录，并把最后的发布按钮留给你自己。
 
-[English README](README.md) · [Chrome 应用商店](https://chromewebstore.google.com/detail/xposter/iimkimodgdjnnmdopeolboakhjmhfbbj?authuser=0&hl=zh-CN) · [使用指南](docs/usage.zh-CN.md) · [隐私说明](docs/privacy.zh-CN.md)
+[English README](README.md) · [Chrome Web Store / Chrome 应用商店](https://chromewebstore.google.com/detail/xposter/iimkimodgdjnnmdopeolboakhjmhfbbj?authuser=0&hl=zh-CN) · [使用指南](docs/usage.zh-CN.md) · [隐私说明](docs/privacy.zh-CN.md)
 
 ![xPoster Markdown 到 X Articles 概览](docs/images/github-hero.zh-CN.svg)
 

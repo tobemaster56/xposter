@@ -824,6 +824,86 @@
     return /^(?:file:\/\/\/?|[a-zA-Z]:[\\/]|\/)/.test(String(source || ""));
   }
 
+  function parseLocalImagePath(source) {
+    if (isAbsoluteLocalImageSource(source)) {
+      return { ok: false, error: "Absolute paths outside the selected folder are not supported", source };
+    }
+
+    const cleanPath = String(source || "")
+      .replace(/\\/g, "/")
+      .split(/[?#]/)[0]
+      .replace(/^\.\/+/, "")
+      .replace(/\/+/g, "/")
+      .replace(/^\/+/, "");
+
+    if (/^[a-zA-Z]:\//.test(cleanPath)) {
+      return { ok: false, error: "Absolute paths outside the selected folder are not supported", source };
+    }
+
+    const parts = cleanPath
+      .split("/")
+      .map((part) => {
+        try {
+          return decodeURIComponent(part);
+        } catch {
+          return part;
+        }
+      })
+      .filter((part) => part && part !== ".");
+
+    if (!parts.length || parts[parts.length - 1] === "..") {
+      return { ok: false, error: "Local image path is empty", source };
+    }
+
+    let depth = 0;
+    for (const part of parts) {
+      if (part === "..") depth -= 1;
+      else depth += 1;
+      if (depth < 0) return { ok: false, error: "Path escapes the selected folder", source };
+    }
+
+    return { ok: true, parts, source };
+  }
+
+  function localImageRootNames(rootNames) {
+    const values = Array.isArray(rootNames) ? rootNames : [rootNames];
+    return values
+      .map((name) => String(name || "").trim())
+      .filter(Boolean);
+  }
+
+  function localImagePathPartMatchesName(part, name) {
+    return String(part || "").normalize("NFC").toLowerCase() === String(name || "").normalize("NFC").toLowerCase();
+  }
+
+  function localImagePathCandidatesFromParts(parts, rootNames = []) {
+    const candidates = [];
+    const seen = new Set();
+    const add = (candidate) => {
+      if (!candidate.length) return;
+      const key = candidate.join("\0");
+      if (seen.has(key)) return;
+      seen.add(key);
+      candidates.push(candidate);
+    };
+
+    add(parts);
+    if (parts.length <= 1) return candidates;
+
+    const names = localImageRootNames(rootNames);
+    for (let index = 0; index < parts.length - 1; index += 1) {
+      if (names.some((name) => localImagePathPartMatchesName(parts[index], name))) {
+        add(parts.slice(index + 1));
+      }
+    }
+    return candidates;
+  }
+
+  function localImagePathCandidates(source, rootNames = []) {
+    const parsed = parseLocalImagePath(source);
+    return parsed.ok ? localImagePathCandidatesFromParts(parsed.parts, rootNames) : [];
+  }
+
   function guessFileName(source, fallback = "image") {
     if (typeof source !== "string") return `${fallback}.png`;
     if (source.startsWith("data:")) return `${fallback}.png`;
@@ -1003,59 +1083,38 @@
       return { ok: false, error: "Local image folder permission expired" };
     }
 
-    if (isAbsoluteLocalImageSource(source)) {
-      return { ok: false, error: "Absolute paths outside the selected folder are not supported", source };
-    }
+    const parsedPath = parseLocalImagePath(source);
+    if (!parsedPath.ok) return parsedPath;
 
-    let cleanPath = String(source)
-      .replace(/\\/g, "/")
-      .split(/[?#]/)[0]
-      .replace(/^\.\//, "")
-      .replace(/\/+/g, "/")
-      .replace(/^\/+/, "");
+    const candidates = localImagePathCandidatesFromParts(parsedPath.parts, [record.name, record.handle.name]);
+    let lastError = null;
 
-    if (/^[a-zA-Z]:\//.test(cleanPath)) {
-      return { ok: false, error: "Absolute paths outside the selected folder are not supported" };
-    }
-
-    const parts = cleanPath.split("/").map((part) => {
+    for (const parts of candidates) {
       try {
-        return decodeURIComponent(part);
-      } catch {
-        return part;
+        let directory = record.handle;
+        for (const part of parts.slice(0, -1)) {
+          if (part === "..") throw new Error("Cannot traverse above selected folder");
+          directory = await directory.getDirectoryHandle(part, { create: false });
+        }
+        const file = await (await directory.getFileHandle(parts[parts.length - 1], { create: false })).getFile();
+        const mime = file.type || extensionMime(file.name);
+        const valid = validateImagePayload(mime, file.size || 0);
+        if (!valid.ok) return { ...valid, source };
+        const buffer = await file.arrayBuffer();
+        return {
+          ok: true,
+          base64: arrayBufferToBase64(buffer),
+          mime,
+          fileName: file.name,
+          bytes: buffer.byteLength,
+          source
+        };
+      } catch (error) {
+        lastError = error;
       }
-    });
-
-    let depth = 0;
-    for (const part of parts) {
-      if (part === "..") depth -= 1;
-      else if (part && part !== ".") depth += 1;
-      if (depth < 0) return { ok: false, error: "Path escapes the selected folder" };
     }
 
-    try {
-      let directory = record.handle;
-      for (const part of parts.slice(0, -1)) {
-        if (!part || part === ".") continue;
-        if (part === "..") throw new Error("Cannot traverse above selected folder");
-        directory = await directory.getDirectoryHandle(part, { create: false });
-      }
-      const file = await (await directory.getFileHandle(parts[parts.length - 1], { create: false })).getFile();
-      const mime = file.type || extensionMime(file.name);
-      const valid = validateImagePayload(mime, file.size || 0);
-      if (!valid.ok) return { ...valid, source };
-      const buffer = await file.arrayBuffer();
-      return {
-        ok: true,
-        base64: arrayBufferToBase64(buffer),
-        mime,
-        fileName: file.name,
-        bytes: buffer.byteLength,
-        source
-      };
-    } catch (error) {
-      return { ok: false, error: error?.message || "Local file not found", source };
-    }
+    return { ok: false, error: lastError?.message || "Local file not found", source };
   }
 
   async function renderTableImage(table, fileName = `table-${Date.now()}.png`) {
@@ -1156,6 +1215,7 @@
     imageSourcesMatch,
     isLocalImageSource,
     isAbsoluteLocalImageSource,
+    localImagePathCandidates,
     guessFileName,
     extensionMime,
     isSupportedImageMime,

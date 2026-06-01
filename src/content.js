@@ -11,6 +11,7 @@
   const SUCCESS_CELEBRATION_STYLE_ID = "__xposter_success_celebration_style__";
   const SUCCESS_CELEBRATION_DURATION_MS = 3200;
   const SUCCESS_CELEBRATION_PIECE_COUNT = 72;
+  const nodeCache = new WeakMap();
   const SIDEPANEL_DRAFT_STORAGE_KEY = "xposter_sidepanel_draft";
   const PENDING_ARTICLE_IMPORT_STORAGE_KEY = "xposter_pending_article_import";
   const ARTICLE_EXPORT_SETTINGS_STORAGE_KEY = "xposter_article_export_settings";
@@ -56,6 +57,7 @@
     "Could not find the X Article create button": "未找到 X 文章新建按钮",
     "Choose a Markdown file": "请选择 Markdown 文件",
     "Drop a Markdown file or Markdown text.": "拖入 Markdown 文件或 Markdown 文本。",
+    "Could not read the dropped Markdown file. Try the import button or drop a real .md file.": "无法读取拖入的 Markdown 文件。请试试导入按钮，或拖入真正的 .md 文件。",
     "Opening X Article...": "正在打开 X 文章...",
     "No Markdown content": "没有 Markdown 内容",
     "No readable article text found.": "未找到可读取的文章正文。",
@@ -333,6 +335,8 @@
       [/^Retrying image (.+)\.\.\.$/, "正在重试图片 $1..."],
       [/^Rendering (\d+) table\(s\)\.\.\.$/, "正在渲染 $1 个表格..."],
       [/^Uploading image (\d+)\/(\d+)\.\.\.$/, "正在上传图片 $1/$2..."],
+      [/^Uploading image (\d+)\/(\d+)\.\.\. waiting for X to finish\.$/, "正在上传图片 $1/$2，等待 X 完成处理..."],
+      [/^Image (\d+)\/(\d+) is in the editor; continuing\.\.\.$/, "图片 $1/$2 已进入编辑器，继续处理..."],
       [/^Pasting structured Markdown\.\.\.$/, "正在粘贴结构化 Markdown..."],
       [/^Inserting (\d+) special block\(s\)\.\.\.$/, "正在插入 $1 个特殊内容块..."],
       [/^Reordering uploaded media\.\.\.$/, "正在整理已上传图片..."],
@@ -341,14 +345,22 @@
       [/^Cleaning up import markers\.\.\.$/, "正在清理写入标记..."],
       [/^Images: (\d+)\/25\. Remove (\d+) image\(s\) before writing\.$/, "图片：$1/25。请先删掉 $2 张图再写入。"],
       [/^Images: (\d+)\/25\. Close to X Article's image limit\.$/, "图片：$1/25。已接近 X 文章图片上限。"],
-      [/^Article written(?: in (.+))?\.$/, (_, elapsed) => elapsed ? `文章已写入，用时 ${elapsed}。` : "文章已写入。"],
+      [/^Article written(?: in ((?:\d+(?:\.\d+)?s)|elapsed time unknown))?\.$/, (_, elapsed) => elapsed ? `文章已写入，用时 ${elapsed}。` : "文章已写入。"],
       [/^Article written(?: in (.+))?\. (.+) web image\(s\) stayed as Markdown links\.(?: Replace unreachable image URLs with public links, then write again if those images must upload\.)?$/, (_, elapsed, images) => elapsed ? `文章已写入，用时 ${elapsed}。${images} 张网页图片保留为 Markdown 链接。` : `文章已写入。${images} 张网页图片保留为 Markdown 链接。`],
+      [/^Article written(?: in (.+))?\. (.+) body image\(s\) stayed as Markdown links; (.+) table image\(s\) stayed as Markdown tables; (.+) cover image\(s\) could not be applied; (.+) image\(s\) are in the editor while X finishes media IDs\.(?: Replace unreachable image URLs with public links, then write again if those images must upload\.)?$/, (_, elapsed, images, tables, covers, pending) => elapsed ? `文章已写入，用时 ${elapsed}。${images} 张正文图片保留为 Markdown 链接；${tables} 个表格保留为 Markdown；${covers} 张封面图片未能设置；${pending} 张图片已进入编辑器，X 仍在完成媒体编号。` : `文章已写入。${images} 张正文图片保留为 Markdown 链接；${tables} 个表格保留为 Markdown；${covers} 张封面图片未能设置；${pending} 张图片已进入编辑器，X 仍在完成媒体编号。`],
+      [/^Article written(?: in (.+))?\. (.+) body image\(s\) stayed as Markdown links; (.+) table image\(s\) stayed as Markdown tables; (.+) image\(s\) are in the editor while X finishes media IDs\.(?: Replace unreachable image URLs with public links, then write again if those images must upload\.)?$/, (_, elapsed, images, tables, pending) => elapsed ? `文章已写入，用时 ${elapsed}。${images} 张正文图片保留为 Markdown 链接；${tables} 个表格保留为 Markdown；${pending} 张图片已进入编辑器，X 仍在完成媒体编号。` : `文章已写入。${images} 张正文图片保留为 Markdown 链接；${tables} 个表格保留为 Markdown；${pending} 张图片已进入编辑器，X 仍在完成媒体编号。`],
+      [/^Article written(?: in (.+))?\. (.+) body image\(s\) stayed as Markdown links; (.+) cover image\(s\) could not be applied; (.+) image\(s\) are in the editor while X finishes media IDs\.(?: Replace unreachable image URLs with public links, then write again if those images must upload\.)?$/, (_, elapsed, images, covers, pending) => elapsed ? `文章已写入，用时 ${elapsed}。${images} 张正文图片保留为 Markdown 链接；${covers} 张封面图片未能设置；${pending} 张图片已进入编辑器，X 仍在完成媒体编号。` : `文章已写入。${images} 张正文图片保留为 Markdown 链接；${covers} 张封面图片未能设置；${pending} 张图片已进入编辑器，X 仍在完成媒体编号。`],
+      [/^Article written(?: in (.+))?\. (.+) body image\(s\) stayed as Markdown links; (.+) image\(s\) are in the editor while X finishes media IDs\.(?: Replace unreachable image URLs with public links, then write again if those images must upload\.)?$/, (_, elapsed, images, pending) => elapsed ? `文章已写入，用时 ${elapsed}。${images} 张正文图片保留为 Markdown 链接；${pending} 张图片已进入编辑器，X 仍在完成媒体编号。` : `文章已写入。${images} 张正文图片保留为 Markdown 链接；${pending} 张图片已进入编辑器，X 仍在完成媒体编号。`],
+      [/^Article written(?: in (.+))?\. (.+) table image\(s\) stayed as Markdown tables; (.+) cover image\(s\) could not be applied; (.+) image\(s\) are in the editor while X finishes media IDs\.$/, (_, elapsed, tables, covers, pending) => elapsed ? `文章已写入，用时 ${elapsed}。${tables} 个表格保留为 Markdown；${covers} 张封面图片未能设置；${pending} 张图片已进入编辑器，X 仍在完成媒体编号。` : `文章已写入。${tables} 个表格保留为 Markdown；${covers} 张封面图片未能设置；${pending} 张图片已进入编辑器，X 仍在完成媒体编号。`],
+      [/^Article written(?: in (.+))?\. (.+) table image\(s\) stayed as Markdown tables; (.+) image\(s\) are in the editor while X finishes media IDs\.$/, (_, elapsed, tables, pending) => elapsed ? `文章已写入，用时 ${elapsed}。${tables} 个表格保留为 Markdown；${pending} 张图片已进入编辑器，X 仍在完成媒体编号。` : `文章已写入。${tables} 个表格保留为 Markdown；${pending} 张图片已进入编辑器，X 仍在完成媒体编号。`],
+      [/^Article written(?: in (.+))?\. (.+) cover image\(s\) could not be applied; (.+) image\(s\) are in the editor while X finishes media IDs\.$/, (_, elapsed, covers, pending) => elapsed ? `文章已写入，用时 ${elapsed}。${covers} 张封面图片未能设置；${pending} 张图片已进入编辑器，X 仍在完成媒体编号。` : `文章已写入。${covers} 张封面图片未能设置；${pending} 张图片已进入编辑器，X 仍在完成媒体编号。`],
       [/^Article written(?: in (.+))?\. (.+) body image\(s\) stayed as Markdown links; (.+) table image\(s\) stayed as Markdown tables; (.+) cover image\(s\) could not be applied\.(?: Replace unreachable image URLs with public links, then write again if those images must upload\.)?$/, (_, elapsed, images, tables, covers) => elapsed ? `文章已写入，用时 ${elapsed}。${images} 张正文图片保留为 Markdown 链接；${tables} 个表格保留为 Markdown；${covers} 张封面图片未能设置。` : `文章已写入。${images} 张正文图片保留为 Markdown 链接；${tables} 个表格保留为 Markdown；${covers} 张封面图片未能设置。`],
       [/^Article written(?: in (.+))?\. (.+) body image\(s\) stayed as Markdown links; (.+) table image\(s\) stayed as Markdown tables\.(?: Replace unreachable image URLs with public links, then write again if those images must upload\.)?$/, (_, elapsed, images, tables) => elapsed ? `文章已写入，用时 ${elapsed}。${images} 张正文图片保留为 Markdown 链接；${tables} 个表格保留为 Markdown。` : `文章已写入。${images} 张正文图片保留为 Markdown 链接；${tables} 个表格保留为 Markdown。`],
       [/^Article written(?: in (.+))?\. (.+) body image\(s\) stayed as Markdown links; (.+) cover image\(s\) could not be applied\.(?: Replace unreachable image URLs with public links, then write again if those images must upload\.)?$/, (_, elapsed, images, covers) => elapsed ? `文章已写入，用时 ${elapsed}。${images} 张正文图片保留为 Markdown 链接；${covers} 张封面图片未能设置。` : `文章已写入。${images} 张正文图片保留为 Markdown 链接；${covers} 张封面图片未能设置。`],
       [/^Article written(?: in (.+))?\. (.+) body image\(s\) stayed as Markdown links\.(?: Replace unreachable image URLs with public links, then write again if those images must upload\.)?$/, (_, elapsed, images) => elapsed ? `文章已写入，用时 ${elapsed}。${images} 张正文图片保留为 Markdown 链接。` : `文章已写入。${images} 张正文图片保留为 Markdown 链接。`],
       [/^Article written(?: in (.+))?\. (.+) cover image\(s\) could not be applied\.$/, (_, elapsed, images) => elapsed ? `文章已写入，用时 ${elapsed}。${images} 张封面图片未能设置。` : `文章已写入。${images} 张封面图片未能设置。`],
       [/^Article written(?: in (.+))?\. (.+) image upload\(s\) timed out in X\. Wait a moment, then write again or split the article if it has many images\.$/, (_, elapsed, images) => elapsed ? `文章已写入，用时 ${elapsed}。${images} 张图片在 X 上传时等待过久。可以稍等后再次写入，或把多图文章拆成多篇。` : `文章已写入。${images} 张图片在 X 上传时等待过久。可以稍等后再次写入，或把多图文章拆成多篇。`],
+      [/^Article written(?: in (.+))?\. (.+) image\(s\) are in the editor while X finishes media IDs\.$/, (_, elapsed, images) => elapsed ? `文章已写入，用时 ${elapsed}。${images} 张图片已进入编辑器，X 仍在完成媒体编号。` : `文章已写入。${images} 张图片已进入编辑器，X 仍在完成媒体编号。`],
       [/^Article written(?: in (.+))?\. (.+) table\(s\) kept as Markdown\.$/, (_, elapsed, tables) => elapsed ? `文章已写入，用时 ${elapsed}。${tables} 个表格保留为 Markdown。` : `文章已写入。${tables} 个表格保留为 Markdown。`],
       [/^Article written(?: in (.+))?\. (.+) table image\(s\) stayed as Markdown tables; (.+) cover image\(s\) could not be applied\.$/, (_, elapsed, tables, covers) => elapsed ? `文章已写入，用时 ${elapsed}。${tables} 个表格保留为 Markdown；${covers} 张封面图片未能设置。` : `文章已写入。${tables} 个表格保留为 Markdown；${covers} 张封面图片未能设置。`],
       [/^Article written(?: in (.+))?\. (.+) table image\(s\) stayed as Markdown tables\.$/, (_, elapsed, tables) => elapsed ? `文章已写入，用时 ${elapsed}。${tables} 个表格保留为 Markdown。` : `文章已写入。${tables} 个表格保留为 Markdown。`],
@@ -393,6 +405,68 @@
     return cleaned.length > maxLength ? `${cleaned.slice(0, Math.max(0, maxLength - 3))}...` : cleaned;
   }
 
+  function setDatasetValueIfChanged(node, key, value) {
+    const next = String(value ?? "");
+    if (!node || !key || node.dataset[key] === next) return;
+    node.dataset[key] = next;
+  }
+
+  function removeDatasetValueIfChanged(node, key) {
+    if (!node || !key || !(key in node.dataset)) return;
+    delete node.dataset[key];
+  }
+
+  function setAttributeValueIfChanged(node, attribute, value) {
+    const next = String(value ?? "");
+    if (!node || !attribute || node.getAttribute(attribute) === next) return;
+    node.setAttribute(attribute, next);
+  }
+
+  function setBooleanPropertyIfChanged(node, property, value) {
+    if (!node || !property || node[property] === value) return;
+    node[property] = value;
+  }
+
+  function setClassPresenceIfChanged(node, className, present) {
+    if (!node || !className || node.classList.contains(className) === present) return;
+    node.classList.toggle(className, present);
+  }
+
+  function setTextContentIfChanged(node, value) {
+    const next = String(value ?? "");
+    if (!node || node.textContent === next) return;
+    node.textContent = next;
+  }
+
+  function setSourceHtmlIfChanged(node, html) {
+    const source = String(html ?? "");
+    if (!node || node.__xposterSourceHtml === source) return false;
+    node.__xposterSourceHtml = source;
+    if (node.innerHTML !== source) node.innerHTML = source;
+    return true;
+  }
+
+  function cachedElementNodes(root, key, collect, isValid) {
+    if (!root) return null;
+    const cacheKey = String(key || "");
+    const cached = nodeCache.get(root)?.[cacheKey];
+    if (cached && (!isValid || isValid(cached))) return cached;
+    const nodes = collect(root);
+    nodeCache.set(root, { ...(nodeCache.get(root) || {}), [cacheKey]: nodes });
+    return nodes;
+  }
+
+  function setStylePropertyIfChanged(node, property, value) {
+    const next = String(value ?? "");
+    if (!node || !property || node.style.getPropertyValue(property) === next) return;
+    node.style.setProperty(property, next);
+  }
+
+  function removeStylePropertyIfChanged(node, property) {
+    if (!node || !property || !node.style.getPropertyValue(property)) return;
+    node.style.removeProperty(property);
+  }
+
   function statusThemeFromPage() {
     for (const element of [document.body, document.documentElement]) {
       if (!element) continue;
@@ -407,14 +481,14 @@
   }
 
   function syncStatusTheme(card) {
-    card.dataset.theme = statusThemeFromPage();
+    setDatasetValueIfChanged(card, "theme", statusThemeFromPage());
     if (typeof chrome === "undefined" || !chrome.storage?.local) return;
     chrome.storage.local.get(THEME_STORAGE_KEY).then((stored) => {
       if (!card.isConnected) return;
       const selectedTheme = stored?.[THEME_STORAGE_KEY];
-      card.dataset.theme = selectedTheme === "light" || selectedTheme === "dark"
+      setDatasetValueIfChanged(card, "theme", selectedTheme === "light" || selectedTheme === "dark"
         ? selectedTheme
-        : statusThemeFromPage();
+        : statusThemeFromPage());
     }).catch(() => {});
   }
 
@@ -450,16 +524,16 @@
       percent = Number.isFinite(retained) && retained > 0 ? retained : null;
     }
     const hasProgress = Number.isFinite(percent);
-    card.dataset.progress = hasProgress ? "determinate" : level === "work" ? "indeterminate" : "none";
+    setDatasetValueIfChanged(card, "progress", hasProgress ? "determinate" : level === "work" ? "indeterminate" : "none");
     if (hasProgress) {
       const boundedPercent = Math.max(0, Math.min(100, percent));
-      card.dataset.progressValue = String(boundedPercent);
-      card.style.setProperty("--__xposter-status-progress", `${boundedPercent}%`);
+      setDatasetValueIfChanged(card, "progressValue", boundedPercent);
+      setStylePropertyIfChanged(card, "--__xposter-status-progress", `${boundedPercent}%`);
     } else {
-      delete card.dataset.progressValue;
-      card.style.removeProperty("--__xposter-status-progress");
+      removeDatasetValueIfChanged(card, "progressValue");
+      removeStylePropertyIfChanged(card, "--__xposter-status-progress");
     }
-    card.setAttribute("aria-busy", String(level === "work"));
+    setAttributeValueIfChanged(card, "aria-busy", String(level === "work"));
   }
 
   function refreshContentLanguageSoon() {
@@ -490,7 +564,7 @@
         </div>
         <p></p>
       `;
-      card.querySelector(".__xposter_status_stop")?.addEventListener("click", (event) => {
+      statusCardNodes(card).stopButton?.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
         cancelActiveImport();
@@ -498,38 +572,51 @@
       document.body.appendChild(card);
       injectStatusStyle();
     }
-    const title = card.querySelector("strong");
-    const detail = card.querySelector("p");
+    const { title, detail } = statusCardNodes(card);
     const previousLevel = card.dataset.level;
-    card.dataset.level = level;
-    card.dataset.statusText = text;
+    setDatasetValueIfChanged(card, "level", level);
+    setDatasetValueIfChanged(card, "statusText", text);
     syncStatusTheme(card);
     updateStatusProgress(card, text, level, previousLevel);
-    if (title) title.textContent = translateContentText(statusTitleForLevel(level));
-    if (detail) detail.textContent = translateContentText(text);
+    setTextContentIfChanged(title, translateContentText(statusTitleForLevel(level)));
+    setTextContentIfChanged(detail, translateContentText(text));
     syncStatusStopButton(card, level);
-    document.body.classList.add("__xposter_status_visible");
+    setClassPresenceIfChanged(document.body, "__xposter_status_visible", true);
     broadcast({ type: "status", text, level });
     if (timeout) window.setTimeout(hideStatus, timeout);
   }
 
+  function statusCardNodes(card) {
+    if (!card) return {};
+    return cachedElementNodes(
+      card,
+      "status",
+      (root) => ({
+        title: root.querySelector("strong"),
+        detail: root.querySelector("p"),
+        stopButton: root.querySelector(".__xposter_status_stop")
+      }),
+      (nodes) => nodes.title?.isConnected && nodes.detail?.isConnected && nodes.stopButton?.isConnected
+    );
+  }
+
   function syncStatusStopButton(card = document.getElementById(STATUS_ID), level = card?.dataset?.level || "work") {
-    const button = card?.querySelector?.(".__xposter_status_stop");
+    const button = statusCardNodes(card).stopButton;
     if (!card || !button) return;
     const stopping = state.busy && state.cancelRequested;
     const canStop = state.busy && !stopping && (level === "work" || level === "warn");
     const visible = canStop || stopping;
-    button.hidden = !visible;
-    button.disabled = stopping;
-    button.textContent = translateContentText(stopping ? "Stopping..." : "Stop");
-    button.setAttribute("aria-label", translateContentText(stopping ? "Stopping..." : "Stop"));
-    card.dataset.cancelling = String(stopping);
-    card.dataset.cancellable = String(visible);
+    setBooleanPropertyIfChanged(button, "hidden", !visible);
+    setBooleanPropertyIfChanged(button, "disabled", stopping);
+    setTextContentIfChanged(button, translateContentText(stopping ? "Stopping..." : "Stop"));
+    setAttributeValueIfChanged(button, "aria-label", translateContentText(stopping ? "Stopping..." : "Stop"));
+    setDatasetValueIfChanged(card, "cancelling", String(stopping));
+    setDatasetValueIfChanged(card, "cancellable", String(visible));
   }
 
   function hideStatus() {
     document.getElementById(STATUS_ID)?.remove();
-    document.body.classList.remove("__xposter_status_visible");
+    setClassPresenceIfChanged(document.body, "__xposter_status_visible", false);
     broadcast({ type: "status", text: "", level: "idle" });
   }
 
@@ -562,10 +649,9 @@
     const status = document.getElementById(STATUS_ID);
     if (status) {
       const level = status.dataset.level || "work";
-      const title = status.querySelector("strong");
-      const detail = status.querySelector("p");
-      if (title) title.textContent = translateContentText(statusTitleForLevel(level));
-      if (detail) detail.textContent = translateContentText(status.dataset.statusText || contentSourceText(detail.textContent || ""));
+      const { title, detail } = statusCardNodes(status);
+      setTextContentIfChanged(title, translateContentText(statusTitleForLevel(level)));
+      setTextContentIfChanged(detail, translateContentText(status.dataset.statusText || contentSourceText(detail.textContent || "")));
       syncStatusStopButton(status, level);
     }
     updateArticleExportButtonMode();
@@ -1021,14 +1107,21 @@
 
   function articleMediaUploadEstimate(parsed = null, options = {}) {
     const segments = Array.isArray(parsed?.segments) ? parsed.segments : [];
-    const bodyImages = segments.filter((segment) => segment.type === "image").length;
-    const tables = segments.filter((segment) => segment.type === "table").length;
     const coverSource = options.setCover === false ? "" : String(parsed?.cover || "").trim();
-    const coverOnly = coverSource && !segments.some(
-      (segment) => segment.type === "image" && shared.imageSourcesMatch(segment.source, coverSource)
-    )
-      ? 1
-      : 0;
+    let bodyImages = 0;
+    let tables = 0;
+    let coverInBody = false;
+    for (const segment of segments) {
+      if (segment.type === "image") {
+        bodyImages += 1;
+        if (coverSource && !coverInBody && shared.imageSourcesMatch(segment.source, coverSource)) {
+          coverInBody = true;
+        }
+      } else if (segment.type === "table") {
+        tables += 1;
+      }
+    }
+    const coverOnly = coverSource && !coverInBody ? 1 : 0;
     const total = bodyImages + tables + coverOnly;
     return {
       bodyImages,
@@ -1459,8 +1552,13 @@
         overlay.remove();
         resolve(value);
       };
-      panel.querySelector("#xposter-vault-skip").addEventListener("click", () => finish({ ok: false, skipped: true }));
-      panel.querySelector("#xposter-vault-pick").addEventListener("click", async () => {
+      panel.addEventListener("click", async (event) => {
+        const button = event.target.closest?.("button");
+        if (button?.id === "xposter-vault-skip") {
+          finish({ ok: false, skipped: true });
+          return;
+        }
+        if (button?.id !== "xposter-vault-pick") return;
         try {
           const handle = await window.showDirectoryPicker({ id: "xposter_vault_root", mode: "read" });
           const permission = await shared.ensureReadPermission(handle);
@@ -1688,16 +1786,18 @@
     const skippedImages = Number(warnings.images || 0) + uploadFailures.image;
     const skippedTables = Number(warnings.tables || 0) + uploadFailures.table;
     const skippedCovers = Number(warnings.covers || 0) + uploadFailures.cover + coverApplicationFailureCount(summary, uploadFailures);
+    const pendingUploads = Number(summary?.main?.imgPending || 0);
     if (uploadFailures.timeout) {
       return `Article written${elapsed}. ${uploadFailures.timeout} image upload(s) timed out in X. Wait a moment, then write again or split the article if it has many images.`;
     }
-    if (skippedImages || skippedTables || skippedCovers) {
+    if (skippedImages || skippedTables || skippedCovers || pendingUploads) {
       const parts = [];
       if (skippedImages) {
         parts.push(`${skippedImages} body image(s) stayed as Markdown links`);
       }
       if (skippedTables) parts.push(`${skippedTables} table image(s) stayed as Markdown tables`);
       if (skippedCovers) parts.push(`${skippedCovers} cover image(s) could not be applied`);
+      if (pendingUploads) parts.push(`${pendingUploads} image(s) are in the editor while X finishes media IDs`);
       const recovery = skippedImages
         ? " Replace unreachable image URLs with public links, then write again if those images must upload."
         : "";
@@ -1966,7 +2066,7 @@
   }
 
   function imageFilesFromTransfer(dataTransfer) {
-    return transferFilesFromDataTransfer(dataTransfer).filter(isImageFile);
+    return partitionTransferFiles(transferFilesFromDataTransfer(dataTransfer)).imageFiles;
   }
 
   function safeTransferData(dataTransfer, type) {
@@ -2278,12 +2378,12 @@
     }
     const root = ensureArticleExportRoot();
     if (!root) return;
-    root.dataset.articleTitle = article.title || "";
-    root.dataset.articleMarkdown = article.markdown;
-    root.dataset.articleFileName = article.fileName || articleFileName(article.title);
-    root.dataset.articleCharacterCount = String(article.characterCount || 0);
-    root.dataset.articleImageCount = String(article.imageCount || 0);
-    root.dataset.mode = normalizeArticleExportMode(state.articleExport.mode);
+    setDatasetValueIfChanged(root, "articleTitle", article.title || "");
+    setDatasetValueIfChanged(root, "articleMarkdown", article.markdown);
+    setDatasetValueIfChanged(root, "articleFileName", article.fileName || articleFileName(article.title));
+    setDatasetValueIfChanged(root, "articleCharacterCount", article.characterCount || 0);
+    setDatasetValueIfChanged(root, "articleImageCount", article.imageCount || 0);
+    setDatasetValueIfChanged(root, "mode", normalizeArticleExportMode(state.articleExport.mode));
     placeArticleExportRoot(root, article);
     updateArticleExportButtonMode();
   }
@@ -2322,19 +2422,33 @@
   function updateArticleExportButtonMode() {
     const root = document.getElementById(ARTICLE_EXPORT_ID);
     if (!root) return;
-    root.setAttribute("aria-label", translateContentText("Article title Markdown tools"));
+    setAttributeValueIfChanged(root, "aria-label", translateContentText("Article title Markdown tools"));
     const mode = normalizeArticleExportMode(state.articleExport.mode);
-    root.dataset.mode = mode;
-    const mark = root.querySelector(".__xposter_article_export_mark");
-    if (mark) mark.textContent = translateContentText("MD");
-    root.querySelectorAll("[data-export-action]").forEach((button) => {
+    setDatasetValueIfChanged(root, "mode", mode);
+    const { mark, buttons } = articleExportNodes(root);
+    setTextContentIfChanged(mark, translateContentText("MD"));
+    buttons.forEach((button) => {
       const buttonMode = normalizeArticleExportMode(button.dataset.exportAction);
       const title = articleExportLabel(buttonMode);
-      button.removeAttribute("data-active");
-      button.innerHTML = articleExportIconMarkup(buttonMode);
-      button.title = title;
-      button.setAttribute("aria-label", title);
+      removeDatasetValueIfChanged(button, "active");
+      setSourceHtmlIfChanged(button, articleExportIconMarkup(buttonMode));
+      setAttributeValueIfChanged(button, "title", title);
+      setAttributeValueIfChanged(button, "aria-label", title);
     });
+  }
+
+  function articleExportNodes(root) {
+    if (!root) return { mark: null, buttons: [], feedback: null };
+    return cachedElementNodes(
+      root,
+      "articleExport",
+      (container) => ({
+        mark: container.querySelector(".__xposter_article_export_mark"),
+        buttons: Array.from(container.querySelectorAll("[data-export-action]")),
+        feedback: container.querySelector(".__xposter_article_export_feedback")
+      }),
+      (nodes) => nodes.mark?.isConnected && nodes.feedback?.isConnected && nodes.buttons?.every((button) => button.isConnected)
+    );
   }
 
   async function handleArticleExportActionClick(event) {
@@ -2419,17 +2533,17 @@
 
   function setArticleExportInlineFeedback(root, message, tone = "done", timeout = 4200) {
     if (!root) return;
-    const feedback = root.querySelector(".__xposter_article_export_feedback");
+    const { feedback } = articleExportNodes(root);
     if (!feedback) return;
     window.clearTimeout(state.articleExport.inlineFeedbackTimer);
-    feedback.textContent = message;
-    feedback.hidden = false;
-    root.dataset.inlineFeedback = tone;
+    setTextContentIfChanged(feedback, message);
+    setBooleanPropertyIfChanged(feedback, "hidden", false);
+    setDatasetValueIfChanged(root, "inlineFeedback", tone);
     state.articleExport.inlineFeedbackTimer = window.setTimeout(() => {
       if (!root.isConnected || root.dataset.inlineFeedback !== tone) return;
-      feedback.hidden = true;
-      feedback.textContent = "";
-      delete root.dataset.inlineFeedback;
+      setBooleanPropertyIfChanged(feedback, "hidden", true);
+      setTextContentIfChanged(feedback, "");
+      removeDatasetValueIfChanged(root, "inlineFeedback");
     }, timeout);
   }
 
@@ -2452,13 +2566,13 @@
     const anchor = article?.titleNode || articleTitleAnchor(article?.container);
     if (anchor?.parentElement) {
       if (root.parentElement !== anchor) anchor.appendChild(root);
-      root.dataset.placement = "inline";
-      root.style.removeProperty("--__xposter-article-export-inline-end");
+      setDatasetValueIfChanged(root, "placement", "inline");
+      removeStylePropertyIfChanged(root, "--__xposter-article-export-inline-end");
       return;
     }
     if (root.parentElement !== document.body) document.body.appendChild(root);
-    root.dataset.placement = "fixed";
-    root.style.setProperty("--__xposter-article-export-inline-end", `${articleDockInlineEnd(article?.container)}px`);
+    setDatasetValueIfChanged(root, "placement", "fixed");
+    setStylePropertyIfChanged(root, "--__xposter-article-export-inline-end", `${articleDockInlineEnd(article?.container)}px`);
   }
 
   function articleTitleAnchor(container) {
@@ -2470,11 +2584,11 @@
   function signalArticleExportFeedback(root, tone = "done") {
     if (!root) return;
     window.clearTimeout(state.articleExport.feedbackTimer);
-    delete root.dataset.feedback;
+    removeDatasetValueIfChanged(root, "feedback");
     void root.offsetWidth;
-    root.dataset.feedback = tone;
+    setDatasetValueIfChanged(root, "feedback", tone);
     state.articleExport.feedbackTimer = window.setTimeout(() => {
-      if (root.isConnected && root.dataset.feedback === tone) delete root.dataset.feedback;
+      if (root.isConnected && root.dataset.feedback === tone) removeDatasetValueIfChanged(root, "feedback");
     }, 900);
   }
 
@@ -3146,20 +3260,28 @@
       if (isLeavingDocument(event)) hideDropHint();
     }, true);
     document.addEventListener("drop", async (event) => {
-      const intent = dropIntentForEvent(event);
+      let intent = dropIntentForEvent(event);
       if (intent === "none") return;
-      const files = transferFilesFromDataTransfer(event.dataTransfer);
-      const markdownFiles = files.filter(isMarkdownFile);
-      const imageFiles = markdownFiles.length ? [] : imageFilesFromTransfer(event.dataTransfer);
+      event.preventDefault();
+      event.stopPropagation();
+      let files = transferFilesFromDataTransfer(event.dataTransfer);
+      if (hasFiles(event.dataTransfer) && transferHasFileSystemHandleItems(event.dataTransfer)) {
+        files = await resolveTransferFilesFromDataTransfer(event.dataTransfer, files);
+      }
+      const fileGroups = partitionTransferFiles(files);
+      const markdownFiles = fileGroups.markdownFiles;
+      if (intent === "sidepanel-queue" && markdownFiles.length === 1) intent = "article";
+      const imageFiles = markdownFiles.length ? [] : fileGroups.imageFiles;
       const markdownText = markdownFiles.length ? "" : markdownTextFromTransfer(event.dataTransfer);
       const imageUrl = markdownFiles.length || imageFiles.length || markdownText ? "" : imageUrlFromTransfer(event.dataTransfer);
       const directoryItem = markdownFiles.length || imageFiles.length || imageUrl ? null : findDirectoryTransferItem(event.dataTransfer);
       if (!markdownFiles.length && !imageFiles.length && !markdownText && !imageUrl && !directoryItem && intent !== "sidepanel-queue") {
         hideDropHint();
+        if (intent === "article" || intent === "sidepanel-draft") {
+          showStatus("Could not read the dropped Markdown file. Try the import button or drop a real .md file.", "warn", 7000);
+        }
         return;
       }
-      event.preventDefault();
-      event.stopPropagation();
       if (directoryItem && !isDropEventOverSurface(event, "folder")) {
         showDropHint(event.dataTransfer, event, intent);
         showStatus("Drop the folder into the blue folder area.", "warn", 3800);
@@ -3171,11 +3293,12 @@
       window.setTimeout(hideDropHint, 260);
       if (intent === "sidepanel-queue") {
         const panelPromise = safeRuntimeSendMessage({ type: "xposter:open-side-panel" }).catch(() => {});
-        await handleSidePanelMarkdownDrop(event.dataTransfer, intent, { openPanelPromise: panelPromise });
+        if (markdownFiles.length > 1) await queueMarkdownFilesForSidePanel(markdownFiles, { openPanelPromise: panelPromise });
+        else await handleSidePanelMarkdownDrop(event.dataTransfer, intent, { openPanelPromise: panelPromise, markdownFiles });
         return;
       }
       if (intent === "sidepanel-draft") {
-        await handleSidePanelMarkdownDrop(event.dataTransfer, intent);
+        await handleSidePanelMarkdownDrop(event.dataTransfer, intent, { markdownFiles });
         return;
       }
       if (markdownFiles.length > 1) {
@@ -3244,18 +3367,21 @@
   }
 
   function sidePanelMarkdownDropIntent(dataTransfer, event = null) {
-    const markdownFileCount = markdownTransferFileCount(dataTransfer);
+    const files = transferFilesFromDataTransfer(dataTransfer);
+    const fileGroups = partitionTransferFiles(files);
+    const itemSummary = fileGroups.markdownFiles.length ? null : summarizeTransferItems(dataTransfer);
+    const markdownFileCount = markdownTransferFileCount(dataTransfer, files, fileGroups.markdownFiles.length, itemSummary);
     if (markdownFileCount > 1) return "sidepanel-queue";
     if (markdownFileCount === 1) return "";
     if (markdownTextFromTransfer(dataTransfer)) return "";
     const types = Array.from(dataTransfer?.types || []);
     if (types.includes("text/markdown")) return "";
     if (
-      hasUnmaterializedFileDrop(dataTransfer) &&
+      hasUnmaterializedFileDrop(dataTransfer, files) &&
       event &&
       isEditorRoute() &&
       isDropEventOverSurface(event, "sidepanel-queue") &&
-      !Array.from(dataTransfer?.items || []).some(isLikelyImageTransferItem)
+      !(itemSummary || summarizeTransferItems(dataTransfer)).hasLikelyImage
     ) {
       return "sidepanel-queue";
     }
@@ -3263,14 +3389,13 @@
   }
 
   function isSingleMarkdownDrop(dataTransfer) {
-    const files = markdownFilesFromTransfer(dataTransfer);
-    if (files.length === 1) return true;
-    if (files.length > 1) return false;
-    if (transferFilesFromDataTransfer(dataTransfer).length) return false;
+    const files = transferFilesFromDataTransfer(dataTransfer);
+    const markdownFiles = partitionTransferFiles(files).markdownFiles;
+    if (markdownFiles.length === 1) return true;
+    if (markdownFiles.length > 1) return false;
+    if (files.length) return false;
     if (markdownTextFromTransfer(dataTransfer)) return true;
-    const items = Array.from(dataTransfer?.items || []);
-    if (items.filter(isLikelyMarkdownTransferItem).length === 1) return true;
-    return false;
+    return summarizeTransferItems(dataTransfer).likelyMarkdownCount === 1;
   }
 
   function isLeavingDocument(event) {
@@ -3304,8 +3429,12 @@
         // Drag previews can block file materialization until drop.
       }
     }
+    return uniqueTransferFiles(files);
+  }
+
+  function uniqueTransferFiles(files) {
     const seen = new Set();
-    return files.filter((file) => {
+    return Array.from(files || []).filter((file) => {
       const key = [file.name || "", file.size || 0, file.type || "", file.lastModified || 0].join(":");
       if (seen.has(key)) return false;
       seen.add(key);
@@ -3313,22 +3442,75 @@
     });
   }
 
-  function markdownFilesFromTransfer(dataTransfer) {
-    return transferFilesFromDataTransfer(dataTransfer).filter(isMarkdownFile);
+  function transferHasFileSystemHandleItems(dataTransfer) {
+    return Array.from(dataTransfer?.items || []).some(
+      (item) => item?.kind === "file" && !isDirectoryTransferItem(item) && typeof item.getAsFileSystemHandle === "function"
+    );
   }
 
-  function markdownTransferFileCount(dataTransfer) {
-    const files = markdownFilesFromTransfer(dataTransfer);
-    if (files.length) return files.length;
+  async function resolveTransferFilesFromDataTransfer(dataTransfer, files = transferFilesFromDataTransfer(dataTransfer)) {
+    const handleItems = Array.from(dataTransfer?.items || []).filter(
+      (item) => item?.kind === "file" && !isDirectoryTransferItem(item) && typeof item.getAsFileSystemHandle === "function"
+    );
+    if (!handleItems.length) return files;
+    const resolved = [...files];
+    const handles = await Promise.all(handleItems.map((item) => item.getAsFileSystemHandle().catch(() => null)));
+    for (const handle of handles) {
+      if (handle?.kind !== "file" || typeof handle.getFile !== "function") continue;
+      try {
+        const file = await handle.getFile();
+        if (file) resolved.push(file);
+      } catch {
+        // Some drag sources expose a handle but revoke file reads after drop.
+      }
+    }
+    return uniqueTransferFiles(resolved);
+  }
+
+  function partitionTransferFiles(files) {
+    const markdownFiles = [];
+    const imageFiles = [];
+    for (const file of files || []) {
+      if (isMarkdownFile(file)) markdownFiles.push(file);
+      if (isImageFile(file)) imageFiles.push(file);
+    }
+    return { markdownFiles, imageFiles };
+  }
+
+  function summarizeTransferItems(dataTransfer) {
     const items = Array.from(dataTransfer?.items || []);
-    const markdownItems = items.filter(isLikelyMarkdownTransferItem);
-    if (markdownItems.length) return markdownItems.length;
-    if (hasFiles(dataTransfer) && items.length > 1 && !items.some(isLikelyImageTransferItem)) return items.length;
+    let likelyMarkdownCount = 0;
+    let hasLikelyImage = false;
+    for (const item of items) {
+      if (isLikelyMarkdownTransferItem(item)) likelyMarkdownCount += 1;
+      if (isLikelyImageTransferItem(item)) hasLikelyImage = true;
+    }
+    return { items, likelyMarkdownCount, hasLikelyImage };
+  }
+
+  function countMarkdownFiles(files) {
+    let count = 0;
+    for (const file of files || []) {
+      if (isMarkdownFile(file)) count += 1;
+    }
+    return count;
+  }
+
+  function markdownFilesFromTransfer(dataTransfer) {
+    return partitionTransferFiles(transferFilesFromDataTransfer(dataTransfer)).markdownFiles;
+  }
+
+  function markdownTransferFileCount(dataTransfer, files = transferFilesFromDataTransfer(dataTransfer), markdownFileCount = null, itemSummary = null) {
+    const fileCount = markdownFileCount ?? countMarkdownFiles(files);
+    if (fileCount) return fileCount;
+    const summary = itemSummary || summarizeTransferItems(dataTransfer);
+    if (summary.likelyMarkdownCount) return summary.likelyMarkdownCount;
+    if (hasFiles(dataTransfer) && summary.items.length > 1 && !summary.hasLikelyImage) return summary.items.length;
     return 0;
   }
 
-  function hasUnmaterializedFileDrop(dataTransfer) {
-    return hasFiles(dataTransfer) && !transferFilesFromDataTransfer(dataTransfer).length;
+  function hasUnmaterializedFileDrop(dataTransfer, files = transferFilesFromDataTransfer(dataTransfer)) {
+    return hasFiles(dataTransfer) && !files.length;
   }
 
   function isMarkdownFile(file) {
@@ -3390,8 +3572,8 @@
     }
   }
 
-  async function handleSidePanelMarkdownDrop(dataTransfer, intent = "sidepanel-draft", { openPanelPromise = null } = {}) {
-    const files = markdownFilesFromTransfer(dataTransfer);
+  async function handleSidePanelMarkdownDrop(dataTransfer, intent = "sidepanel-draft", { openPanelPromise = null, markdownFiles = null } = {}) {
+    const files = markdownFiles || markdownFilesFromTransfer(dataTransfer);
     try {
       if (files.length > 1 || intent === "sidepanel-queue") {
         if (files.length > 1) await queueMarkdownFilesForSidePanel(files, { openPanelPromise });
@@ -3440,18 +3622,34 @@
       injectDropHintStyle();
       document.body.appendChild(hint);
     }
-    hint.dataset.intent = intent;
+    setDatasetValueIfChanged(hint, "intent", intent);
     updateDropHintSurface(hint, intent);
-    hint.dataset.mode = mode;
-    hint.dataset.state = "ready";
-    hint.dataset.surface = surface;
-    const title = hint.querySelector("strong");
-    const detail = hint.querySelector("p");
-    const status = hint.querySelector(".__xposter_drop_status");
+    setDatasetValueIfChanged(hint, "mode", mode);
+    setDatasetValueIfChanged(hint, "state", "ready");
+    setDatasetValueIfChanged(hint, "surface", surface);
     const copy = dropHintCopy(mode, intent);
-    if (title) title.textContent = translateContentText(copy.title);
-    if (detail) detail.textContent = translateContentText(copy.detail);
-    if (status) status.textContent = translateContentText(dropHintStatusLabel(mode, intent));
+    syncDropHintCopy(hint, copy, mode, intent);
+  }
+
+  function dropHintNodes(hint) {
+    if (!hint) return {};
+    return cachedElementNodes(
+      hint,
+      "dropHint",
+      (root) => ({
+        title: root.querySelector("strong"),
+        detail: root.querySelector("p"),
+        status: root.querySelector(".__xposter_drop_status")
+      }),
+      (nodes) => nodes.title?.isConnected && nodes.detail?.isConnected && nodes.status?.isConnected
+    );
+  }
+
+  function syncDropHintCopy(hint, copy, mode, intent) {
+    const { title, detail, status } = dropHintNodes(hint);
+    setTextContentIfChanged(title, translateContentText(copy.title));
+    setTextContentIfChanged(detail, translateContentText(copy.detail));
+    setTextContentIfChanged(status, translateContentText(dropHintStatusLabel(mode, intent)));
   }
 
   function dropHintStatusLabel(mode, intent = "") {
@@ -3512,16 +3710,11 @@
     if (!hint) return;
     const mode = dropHintMode(dataTransfer, intent);
     const copy = processingDropHintCopy(mode, intent);
-    hint.dataset.intent = intent;
-    hint.dataset.mode = mode;
-    hint.dataset.state = "processing";
-    hint.dataset.surface = dropHintSurfaceKind(intent);
-    const title = hint.querySelector("strong");
-    const detail = hint.querySelector("p");
-    const status = hint.querySelector(".__xposter_drop_status");
-    if (title) title.textContent = translateContentText(copy.title);
-    if (detail) detail.textContent = translateContentText(copy.detail);
-    if (status) status.textContent = translateContentText(dropHintStatusLabel(mode, intent));
+    setDatasetValueIfChanged(hint, "intent", intent);
+    setDatasetValueIfChanged(hint, "mode", mode);
+    setDatasetValueIfChanged(hint, "state", "processing");
+    setDatasetValueIfChanged(hint, "surface", dropHintSurfaceKind(intent));
+    syncDropHintCopy(hint, copy, mode, intent);
     updateDropHintSurface(hint, intent);
   }
 
@@ -3532,18 +3725,13 @@
   function updateVisibleDropHintCopy() {
     const hint = document.getElementById(DROP_HINT_ID);
     if (!hint) return;
-    hint.setAttribute("aria-label", translateContentText("xPoster page drop target"));
+    setAttributeValueIfChanged(hint, "aria-label", translateContentText("xPoster page drop target"));
     const mode = hint.dataset.mode || "article";
     const intent = hint.dataset.intent || "article";
     const copy = hint.dataset.state === "processing"
       ? processingDropHintCopy(mode, intent)
       : dropHintCopy(mode, intent);
-    const title = hint.querySelector("strong");
-    const detail = hint.querySelector("p");
-    const status = hint.querySelector(".__xposter_drop_status");
-    if (title) title.textContent = translateContentText(copy.title);
-    if (detail) detail.textContent = translateContentText(copy.detail);
-    if (status) status.textContent = translateContentText(dropHintStatusLabel(mode, intent));
+    syncDropHintCopy(hint, copy, mode, intent);
   }
 
   function updateVisibleDropHintSurface() {
@@ -3553,10 +3741,10 @@
 
   function updateDropHintSurface(hint, intent = "article") {
     const rect = dropSurfaceRect(intent);
-    hint.style.setProperty("--xposter-drop-surface-left", `${Math.round(rect.left)}px`);
-    hint.style.setProperty("--xposter-drop-surface-top", `${Math.round(rect.top)}px`);
-    hint.style.setProperty("--xposter-drop-surface-width", `${Math.round(rect.width)}px`);
-    hint.style.setProperty("--xposter-drop-surface-height", `${Math.round(rect.height)}px`);
+    setStylePropertyIfChanged(hint, "--xposter-drop-surface-left", `${Math.round(rect.left)}px`);
+    setStylePropertyIfChanged(hint, "--xposter-drop-surface-top", `${Math.round(rect.top)}px`);
+    setStylePropertyIfChanged(hint, "--xposter-drop-surface-width", `${Math.round(rect.width)}px`);
+    setStylePropertyIfChanged(hint, "--xposter-drop-surface-height", `${Math.round(rect.height)}px`);
   }
 
   function dropHintSurfaceKind(intent = "article") {
@@ -3702,11 +3890,13 @@
     if (!dataTransfer) return "markdown";
     if (hasMarkdownText(dataTransfer)) return "markdown";
     const files = transferFilesFromDataTransfer(dataTransfer);
-    if (files.filter(isMarkdownFile).length > 1 || markdownTransferFileCount(dataTransfer) > 1) return "queue";
-    if (files.some(isMarkdownFile) || markdownTransferFileCount(dataTransfer) === 1) return "markdown";
-    if (files.some(isImageFile)) return "image";
-    const items = Array.from(dataTransfer.items || []);
-    if (items.some(isLikelyImageTransferItem)) return "image";
+    const fileGroups = partitionTransferFiles(files);
+    const itemSummary = fileGroups.markdownFiles.length ? null : summarizeTransferItems(dataTransfer);
+    const markdownFileCount = markdownTransferFileCount(dataTransfer, files, fileGroups.markdownFiles.length, itemSummary);
+    if (markdownFileCount > 1) return "queue";
+    if (fileGroups.markdownFiles.length || markdownFileCount === 1) return "markdown";
+    if (fileGroups.imageFiles.length) return "image";
+    if (itemSummary?.hasLikelyImage) return "image";
     if (transferMayContainImageUrl(dataTransfer) || imageUrlFromTransfer(dataTransfer)) return "image";
     return findDirectoryTransferItem(dataTransfer) ? "folder" : "markdown";
   }

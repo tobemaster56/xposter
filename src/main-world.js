@@ -8,6 +8,8 @@
   const MEDIA_UPLOAD_PER_ITEM_TIMEOUT_MS = 2500;
   const MEDIA_UPLOAD_MAX_TIMEOUT_MS = 150000;
   const MEDIA_UPLOAD_PROGRESS_HEARTBEAT_MS = 15000;
+  const MEDIA_UPLOAD_PENDING_READY_MS = 20000;
+  const MEDIA_UPLOAD_PENDING_STABLE_MS = 5000;
   const MEDIA_UPLOAD_TIMEOUT_ERROR =
     "X media upload took too long. X may be throttling this draft, especially with many images. Wait a moment, then write again or split the article.";
 
@@ -281,26 +283,43 @@
     );
   }
 
-  function findMarkerBlock(contentState, marker) {
-    let blockKey = null;
+  function findMarkerLocation(contentState, marker, options = {}) {
+    const needle = String(marker || "");
+    if (!needle) return null;
+    let exact = null;
+    let partial = null;
     contentState.getBlockMap().forEach((block, key) => {
-      if (block.getType() !== "atomic" && (block.getText() || "").trim() === marker) {
-        blockKey = key;
-        return false;
-      }
-      return true;
+      if (block.getType() === "atomic") return;
+      const text = block.getText() || "";
+      const offset = text.indexOf(needle);
+      if (offset < 0) return;
+      const candidate = {
+        blockKey: key,
+        offset,
+        length: needle.length,
+        exact: text.trim() === needle
+      };
+      if (candidate.exact && !exact) exact = candidate;
+      else if (!partial) partial = candidate;
     });
-    return blockKey;
+    if (exact) return exact;
+    return options.exactOnly ? null : partial;
   }
 
-  function countBlocksStartingWith(draftNode, prefix) {
+  function findMarkerBlock(contentState, marker, options = {}) {
+    return findMarkerLocation(contentState, marker, options)?.blockKey || null;
+  }
+
+  function countMarkerTokens(draftNode, prefix) {
     if (!draftNode || !prefix) return 0;
     let count = 0;
+    const markerPattern = markerTokenPattern(prefix);
     draftNode.props.editorState
       .getCurrentContent()
       .getBlockMap()
       .forEach((block) => {
-        if ((block.getText() || "").trim().startsWith(prefix)) count += 1;
+        const matches = (block.getText() || "").match(markerPattern);
+        if (matches?.length) count += matches.length;
       });
     return count;
   }
@@ -309,7 +328,7 @@
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       const latestNode = findDraftStateNode();
-      if (latestNode && countBlocksStartingWith(latestNode, markerPrefix) >= expectedCount) {
+      if (latestNode && countMarkerTokens(latestNode, markerPrefix) >= expectedCount) {
         return latestNode;
       }
       await sleep(100);
@@ -318,7 +337,7 @@
   }
 
   function replaceMarkerWithAtomic(contentState, marker, entityType, data, mutability, sampleBlock) {
-    const blockKey = findMarkerBlock(contentState, marker);
+    const blockKey = findMarkerBlock(contentState, marker, { exactOnly: true });
     if (!blockKey) return { ok: false, error: `Marker not found: ${marker}`, contentState };
 
     const markerBlock = contentState.getBlockMap().get(blockKey);
@@ -431,17 +450,70 @@
     return entities;
   }
 
-  function mediaIdFromEntityData(data = {}) {
-    const item = data?.mediaItems?.[0] || data?.media_items?.[0] || data?.mediaItem || data?.media_item || data;
-    const mediaId =
-      item?.mediaId ||
-      item?.media_id ||
-      item?.media_id_string ||
-      data?.mediaId ||
-      data?.media_id ||
-      data?.media_id_string ||
-      null;
-    return mediaId == null || mediaId === "" ? null : String(mediaId);
+  function normalizeMediaIdValue(value) {
+    if (value == null || value === "") return null;
+    const text = String(value).trim();
+    if (!text) return null;
+    if (/^\d+$/.test(text)) return text;
+    const mediaKey = text.match(/^\d+_(\d+)$/);
+    if (mediaKey) return mediaKey[1];
+    const trailingDigits = text.match(/(?:^|[_:])(\d{8,})$/);
+    return trailingDigits ? trailingDigits[1] : null;
+  }
+
+  function mediaIdFromEntityData(data = {}, depth = 0) {
+    if (data == null || depth > 5) return null;
+    const primitive = normalizeMediaIdValue(data);
+    if (primitive) return primitive;
+    if (typeof data !== "object") return null;
+
+    if (Array.isArray(data)) {
+      for (const item of data) {
+        const mediaId = mediaIdFromEntityData(item, depth + 1);
+        if (mediaId) return mediaId;
+      }
+      return null;
+    }
+
+    const directKeys = [
+      "mediaId",
+      "mediaID",
+      "media_id",
+      "media_id_string",
+      "mediaIdString",
+      "mediaKey",
+      "media_key",
+      "id_str",
+      "id",
+      "rest_id"
+    ];
+    for (const key of directKeys) {
+      if (!Object.prototype.hasOwnProperty.call(data, key)) continue;
+      const mediaId = normalizeMediaIdValue(data[key]);
+      if (mediaId) return mediaId;
+    }
+
+    const containerKeys = [
+      "mediaItems",
+      "media_items",
+      "mediaItem",
+      "media_item",
+      "media",
+      "upload",
+      "uploadResult",
+      "result"
+    ];
+    for (const key of containerKeys) {
+      if (!Object.prototype.hasOwnProperty.call(data, key)) continue;
+      const mediaId = mediaIdFromEntityData(data[key], depth + 1);
+      if (mediaId) return mediaId;
+    }
+
+    for (const value of Object.values(data)) {
+      const mediaId = mediaIdFromEntityData(value, depth + 1);
+      if (mediaId) return mediaId;
+    }
+    return null;
   }
 
   function findNewMediaUpload(contentState, existingEntities) {
@@ -473,11 +545,14 @@
     const SelectionState = editorState.getSelection().constructor;
     const EditorState = editorState.constructor;
     const contentState = editorState.getCurrentContent();
-    const blockKey = findMarkerBlock(contentState, marker);
-    if (!blockKey) return false;
-    const selection = SelectionState.createEmpty(blockKey).merge({ anchorOffset: 0, focusOffset: 0 });
+    const location = findMarkerLocation(contentState, marker);
+    if (!location) return null;
+    const selection = SelectionState.createEmpty(location.blockKey).merge({
+      anchorOffset: location.offset,
+      focusOffset: location.offset
+    });
     draftNode.props.onChange(EditorState.forceSelection(editorState, selection));
-    return true;
+    return location;
   }
 
   async function uploadImageAtMarker(draftNode, imageOperation, existingAtomicBlocks, context = {}) {
@@ -485,7 +560,8 @@
     const onFilesAdded = findOnFilesAdded();
     if (!onFilesAdded) return { ok: false, error: "X upload handler was not reachable" };
 
-    if (!placeSelectionAtMarker(draftNode, imageOperation.marker)) {
+    const markerLocation = placeSelectionAtMarker(draftNode, imageOperation.marker);
+    if (!markerLocation) {
       return { ok: false, error: "Image placeholder was not found in the X editor" };
     }
     await sleep(80);
@@ -503,13 +579,23 @@
     const deadline = Date.now() + timeoutMs;
     let nextProgressAt = Date.now() + MEDIA_UPLOAD_PROGRESS_HEARTBEAT_MS;
     let pendingUpload = null;
+    let pendingSignature = "";
+    let pendingFirstSeenAt = 0;
+    let pendingStableSince = 0;
     while (Date.now() < deadline) {
       throwIfCancelled();
       await sleep(350);
-      if (Date.now() >= nextProgressAt) {
+      const now = Date.now();
+      if (now >= nextProgressAt) {
         const index = Number(context.index || 0);
         const total = Number(context.total || 0);
-        if (index && total) progress(`Uploading image ${index}/${total}...`);
+        if (index && total) {
+          progress(
+            pendingUpload
+              ? `Uploading image ${index}/${total}... waiting for X to finish.`
+              : `Uploading image ${index}/${total}...`
+          );
+        }
         nextProgressAt = Date.now() + MEDIA_UPLOAD_PROGRESS_HEARTBEAT_MS;
       }
       draftNode = findDraftStateNode() || draftNode;
@@ -517,9 +603,43 @@
       const found = findNewMediaUpload(contentState, before);
       if (found?.mediaId) {
         existingAtomicBlocks.add(found.blockKey);
-        return { ok: true, ...found };
+        return {
+          ok: true,
+          ...found,
+          markerBlock: markerLocation.blockKey,
+          markerOffset: markerLocation.offset,
+          markerLength: markerLocation.length,
+          markerExact: markerLocation.exact
+        };
       }
-      if (found) pendingUpload = found;
+      if (found) {
+        const signature = `${found.entityKey}:${found.blockKey}`;
+        if (signature !== pendingSignature) {
+          pendingSignature = signature;
+          pendingFirstSeenAt = now;
+          pendingStableSince = now;
+        }
+        pendingUpload = found;
+        const pendingReady =
+          canUsePendingMediaUpload(imageOperation) &&
+          now - pendingFirstSeenAt >= MEDIA_UPLOAD_PENDING_READY_MS &&
+          now - pendingStableSince >= MEDIA_UPLOAD_PENDING_STABLE_MS;
+        if (pendingReady) {
+          const index = Number(context.index || 0);
+          const total = Number(context.total || 0);
+          existingAtomicBlocks.add(found.blockKey);
+          if (index && total) progress(`Image ${index}/${total} is in the editor; continuing...`);
+          return {
+            ok: true,
+            ...found,
+            mediaPending: true,
+            markerBlock: markerLocation.blockKey,
+            markerOffset: markerLocation.offset,
+            markerLength: markerLocation.length,
+            markerExact: markerLocation.exact
+          };
+        }
+      }
     }
 
     return { ok: false, error: MEDIA_UPLOAD_TIMEOUT_ERROR, timeout: true, timeoutMs, pendingEntity: Boolean(pendingUpload) };
@@ -531,14 +651,20 @@
     const SelectionState = editorState.getSelection().constructor;
     const contentState = editorState.getCurrentContent();
     const blockMap = contentState.getBlockMap();
-    const blockKey = findMarkerBlock(contentState, marker);
-    if (!blockKey) return false;
-    if (!String(text || "")) return deleteBlockByKey(draftNode, blockKey).ok;
+    const location = findMarkerLocation(contentState, marker);
+    if (!location) return false;
+    const blockKey = location.blockKey;
     const block = blockMap.get(blockKey);
+    const replacement = String(text || "");
+    const currentText = block.getText() || "";
+    const nextText = location.exact
+      ? replacement
+      : `${currentText.slice(0, location.offset)}${replacement}${currentText.slice(location.offset + location.length)}`;
+    if (!nextText.trim()) return deleteBlockByKey(draftNode, blockKey).ok;
     const characterFactory = block.getCharacterList().get(0)?.constructor;
     const character = characterFactory ? characterFactory.create({}) : null;
-    const characterList = block.getCharacterList().clear().concat(Array.from({ length: text.length }, () => character));
-    const nextBlock = block.merge({ text, characterList });
+    const characterList = block.getCharacterList().clear().concat(Array.from({ length: nextText.length }, () => character));
+    const nextBlock = block.merge({ text: nextText, characterList });
     const selection = SelectionState.createEmpty(blockKey);
     const nextContent = contentState
       .set("blockMap", blockMap.set(blockKey, nextBlock))
@@ -553,6 +679,10 @@
     return new RegExp(`${prefix}[A-Z]+_\\d+__`, "g");
   }
 
+  function allMarkerTokenPattern() {
+    return /__XPOSTER_[A-Za-z0-9]+_[A-Z]+_\d+__/g;
+  }
+
   function relocateImages(draftNode, uploads, protectedAtomicBlocks) {
     if (!uploads.length) return { moved: 0, missing: 0 };
     const editorState = draftNode.props.editorState;
@@ -560,9 +690,19 @@
     const SelectionState = editorState.getSelection().constructor;
     const contentState = editorState.getCurrentContent();
     const blockMap = contentState.getBlockMap();
-    const markerEntries = new Map(uploads.map((upload) => [upload.marker, upload]));
     const entityToBlock = new Map();
     const mediaBlocks = [];
+
+    for (const upload of uploads) {
+      if (upload.markerBlock && blockMap.has(upload.markerBlock)) continue;
+      const location = findMarkerLocation(contentState, upload.marker);
+      if (location) {
+        upload.markerBlock = location.blockKey;
+        upload.markerOffset = location.offset;
+        upload.markerLength = location.length;
+        upload.markerExact = location.exact;
+      }
+    }
 
     blockMap.forEach((block, blockKey) => {
       if (block.getType() === "atomic") {
@@ -584,9 +724,6 @@
             }
           } catch {}
         }
-      } else {
-        const marker = (block.getText() || "").trim();
-        if (markerEntries.has(marker)) markerEntries.get(marker).markerBlock = blockKey;
       }
     });
 
@@ -595,7 +732,7 @@
     let fallbackIndex = 0;
 
     for (const upload of uploads) {
-      if (!upload.markerBlock) {
+      if (!upload.markerBlock || !blockMap.has(upload.markerBlock)) {
         missing += 1;
         continue;
       }
@@ -611,15 +748,26 @@
         missing += 1;
         continue;
       }
-      if (imageBlock !== upload.markerBlock) moves.set(upload.markerBlock, imageBlock);
+      if (imageBlock !== upload.markerBlock) {
+        moves.set(upload.markerBlock, {
+          imageBlock,
+          markerExact: upload.markerExact !== false
+        });
+      }
     }
 
     if (!moves.size) return { moved: 0, missing };
-    const destinationBlocks = new Set(moves.values());
+    const destinationBlocks = new Set(Array.from(moves.values()).map((move) => move.imageBlock));
     const orderedKeys = [];
     blockMap.forEach((block, key) => {
-      if (moves.has(key)) orderedKeys.push(moves.get(key));
-      else if (!destinationBlocks.has(key)) orderedKeys.push(key);
+      if (moves.has(key)) {
+        const move = moves.get(key);
+        if (move.markerExact) orderedKeys.push(move.imageBlock);
+        else {
+          orderedKeys.push(move.imageBlock);
+          orderedKeys.push(key);
+        }
+      } else if (!destinationBlocks.has(key)) orderedKeys.push(key);
     });
 
     let nextBlockMap = blockMap.constructor();
@@ -648,8 +796,12 @@
     blockMap.forEach((block, key) => {
       if (block.getType() === "atomic") return;
       const text = block.getText() || "";
-      if (!text.includes(resolvedPrefix)) return;
-      const cleaned = text.replace(markerPattern, "").replace(/\s{2,}/g, " ").trim();
+      if (!text.includes(resolvedPrefix) && !text.includes("__XPOSTER_")) return;
+      const cleaned = text
+        .replace(markerPattern, "")
+        .replace(allMarkerTokenPattern(), "")
+        .replace(/\s{2,}/g, " ")
+        .trim();
       if (!cleaned) {
         toDelete.push(key);
       } else if (cleaned !== text) {
@@ -858,6 +1010,10 @@
     return "image";
   }
 
+  function canUsePendingMediaUpload(operation) {
+    return !operation?.op?.coverOnly;
+  }
+
   async function applyCoverMetadata(coverSource, articleId, upload, summary) {
     if (!uploadMatchesCover(upload, coverSource) || summary.cover.graphql || summary.cover.skippedReason) return false;
     summary.cover.matchedUpload = true;
@@ -895,6 +1051,7 @@
       atomicFail: 0,
       imgOk: 0,
       imgFail: 0,
+      imgPending: 0,
       imageErrors: [],
       markersCleaned: 0,
       relocatedImages: 0,
@@ -977,10 +1134,15 @@
       });
       if (result.ok) {
         summary.imgOk += 1;
+        if (result.mediaPending) summary.imgPending += 1;
         uploads.push({
           marker: op.marker,
           blockKey: result.blockKey,
           entityKey: result.entityKey,
+          markerBlock: result.markerBlock,
+          markerOffset: result.markerOffset,
+          markerLength: result.markerLength,
+          markerExact: result.markerExact,
           mediaId: result.mediaId,
           source: op.op.source,
           coverOnly: Boolean(op.op.coverOnly)
