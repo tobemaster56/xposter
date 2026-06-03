@@ -4,6 +4,7 @@
   const CHANNEL_FROM_MAIN = "xposter-main";
   const STATUS_ID = "__xposter_status__";
   const IMPORT_BUTTON_ID = "__xposter_import_button__";
+  const IMPORT_CONFIRM_ID = "__xposter_import_confirm__";
   const DROP_HINT_ID = "__xposter_drop_hint__";
   const ARTICLE_EXPORT_ID = "__xposter_article_export__";
   const ARTICLE_EXPORT_STYLE_ID = "__xposter_article_export_style__";
@@ -59,6 +60,14 @@
     "Could not open X Article": "无法打开 X 文章",
     "Could not write dropped Markdown": "无法写入拖入的 Markdown",
     "Could not find the X Article create button": "未找到 X 文章新建按钮",
+    "Import Markdown": "导入 Markdown",
+    "Import Markdown with xPoster": "用 xPoster 导入 Markdown",
+    "Replace current draft?": "替换当前草稿？",
+    "This X Article draft already has content. Importing Markdown will replace it. Continue?": "当前 X 文章草稿已有内容。导入 Markdown 会替换它，继续吗？",
+    "Importing Markdown will replace the title or body already in this X Article draft.": "导入 Markdown 会替换当前 X 文章草稿中的标题或正文。",
+    "Continue import": "继续导入",
+    Cancel: "取消",
+    "Markdown import cancelled.": "已取消 Markdown 导入。",
     "Choose a Markdown file": "请选择 Markdown 文件",
     "Drop a Markdown file or Markdown text.": "拖入 Markdown 文件或 Markdown 文本。",
     "Could not read the dropped Markdown file. Try the import button or drop a real .md file.": "无法读取拖入的 Markdown 文件。请试试导入按钮，或拖入真正的 .md 文件。",
@@ -243,6 +252,7 @@
     return {
       setTitle: options.setTitle !== false,
       setCover: options.setCover !== false,
+      smartPunctuation: options.smartPunctuation === true,
       ...titleCandidateOptions(options)
     };
   }
@@ -777,6 +787,7 @@
     }
     updateArticleExportButtonMode();
     updateVisibleDropHintCopy();
+    syncImportButtonCopy();
   }
 
   async function restoreContentLanguage() {
@@ -1396,6 +1407,7 @@
     state.cancelRequested = false;
     state.uploadRetryRequested = false;
     state.currentMarkdown = markdown;
+    syncImportButtonState();
     const startedAt = performance.now();
     showStatus("Preparing Markdown...", "work");
     try {
@@ -1493,6 +1505,7 @@
       state.uploadRetryRequested = false;
       state.activeRun = null;
       state.currentMarkdown = "";
+      syncImportButtonState();
       const card = document.getElementById(STATUS_ID);
       if (card) {
         setDatasetValueIfChanged(card, "uploadActive", "false");
@@ -3386,46 +3399,150 @@
 
   function installImportButton() {
     injectImportButtonStyles();
+    let syncTimer = 0;
     const mount = () => {
-      if (!isArticleRoute() || isEditorRoute()) {
-        document.getElementById(`${IMPORT_BUTTON_ID}_wrap`)?.remove();
-        return;
-      }
-      if (document.getElementById(IMPORT_BUTTON_ID)) return;
-      const anchor = findCreateButton(["create", "compose", "撰写", "新建", "创建", "新規", "作成"]);
-      if (!anchor?.parentElement?.parentElement) return;
-      const button = document.createElement("button");
-      button.id = IMPORT_BUTTON_ID;
-      button.type = "button";
-      button.title = "Import Markdown with xPoster";
-      button.setAttribute("aria-label", "Import Markdown with xPoster");
-      button.innerHTML = `
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M5 3.5A2.5 2.5 0 0 1 7.5 1H14l5 5v12.5a2.5 2.5 0 0 1-2.5 2.5h-9A2.5 2.5 0 0 1 5 18.5v-15Zm8 1V2.8H7.5a.7.7 0 0 0-.7.7v15a.7.7 0 0 0 .7.7h9a.7.7 0 0 0 .7-.7V7h-3.2A1.9 1.9 0 0 1 13 5.1V4.5ZM9 11h2v3.4l-1.2-1.2-1.4 1.4 2.6 2.6 2.6-2.6-1.4-1.4-1.2 1.2V11h2V9H9v2Z"/>
-        </svg>
-      `;
-      button.addEventListener("click", () => chooseMarkdownFile("button"));
-      const wrap = document.createElement("div");
-      wrap.id = `${IMPORT_BUTTON_ID}_wrap`;
-      wrap.appendChild(button);
-      anchor.parentElement.parentElement.insertBefore(wrap, anchor.parentElement);
+      if (syncTimer) return;
+      syncTimer = window.setTimeout(() => {
+        syncTimer = 0;
+        syncImportButton();
+      }, 80);
     };
 
-    mount();
+    syncImportButton();
     new MutationObserver(mount).observe(document.body, { childList: true, subtree: true });
     const originalPush = history.pushState;
     history.pushState = function (...args) {
       const result = originalPush.apply(this, args);
-      window.setTimeout(mount, 100);
+      window.setTimeout(syncImportButton, 100);
       return result;
     };
     const originalReplace = history.replaceState;
     history.replaceState = function (...args) {
       const result = originalReplace.apply(this, args);
-      window.setTimeout(mount, 100);
+      window.setTimeout(syncImportButton, 100);
       return result;
     };
-    window.addEventListener("popstate", () => window.setTimeout(mount, 100));
+    window.addEventListener("popstate", () => window.setTimeout(syncImportButton, 100));
+  }
+
+  function syncImportButton() {
+    if (!isArticleRoute()) {
+      removeImportButton();
+      return;
+    }
+    const wrap = ensureImportButton();
+    setDatasetValueIfChanged(wrap, "route", isEditorRoute() ? "editor" : "list");
+    placeImportButton(wrap, findImportButtonAnchor());
+    syncImportButtonCopy();
+    syncImportButtonState();
+  }
+
+  function removeImportButton() {
+    document.getElementById(`${IMPORT_BUTTON_ID}_wrap`)?.remove();
+  }
+
+  function ensureImportButton() {
+    let wrap = document.getElementById(`${IMPORT_BUTTON_ID}_wrap`);
+    if (wrap) return wrap;
+    wrap = document.createElement("div");
+    wrap.id = `${IMPORT_BUTTON_ID}_wrap`;
+
+    const button = document.createElement("button");
+    button.id = IMPORT_BUTTON_ID;
+    button.type = "button";
+    button.innerHTML = `
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M5 3.5A2.5 2.5 0 0 1 7.5 1H14l5 5v12.5a2.5 2.5 0 0 1-2.5 2.5h-9A2.5 2.5 0 0 1 5 18.5v-15Zm8 1V2.8H7.5a.7.7 0 0 0-.7.7v15a.7.7 0 0 0 .7.7h9a.7.7 0 0 0 .7-.7V7h-3.2A1.9 1.9 0 0 1 13 5.1V4.5ZM9 11h2v3.4l-1.2-1.2-1.4 1.4 2.6 2.6 2.6-2.6-1.4-1.4-1.2 1.2V11h2V9H9v2Z"/>
+      </svg>
+      <span class="__xposter_import_label"></span>
+    `;
+    button.addEventListener("click", () => chooseMarkdownFile("button"));
+    wrap.appendChild(button);
+    return wrap;
+  }
+
+  function findImportButtonAnchor() {
+    const createButton = !isEditorRoute()
+      ? findCreateButton(["create", "compose", "撰写", "新建", "创建", "新規", "作成"])
+      : null;
+    if (createButton?.parentElement?.parentElement) {
+      return {
+        container: createButton.parentElement.parentElement,
+        before: createButton.parentElement,
+        placement: "inline"
+      };
+    }
+    return findImportButtonHeaderAnchor();
+  }
+
+  function findImportButtonHeaderAnchor() {
+    const roots = [
+      document.getElementById("root-header")?.closest("div")?.parentElement,
+      document.querySelector("header[role='banner']"),
+      document.querySelector("header")
+    ].filter(Boolean);
+    const seen = new Set();
+    for (const root of roots) {
+      if (seen.has(root) || !isElementVisible(root)) continue;
+      seen.add(root);
+      const buttons = Array.from(root.querySelectorAll("button, a[role='button']")).filter((button) => (
+        button.id !== IMPORT_BUTTON_ID &&
+        !button.closest?.(`#${IMPORT_BUTTON_ID}_wrap`) &&
+        isElementVisible(button)
+      ));
+      const rightSideButton = buttons
+        .map((button) => ({ button, rect: button.getBoundingClientRect() }))
+        .filter(({ rect }) => rect.top < 180 && rect.right > Math.max(320, window.innerWidth * 0.42))
+        .sort((left, right) => right.rect.right - left.rect.right)[0]?.button;
+      if (rightSideButton?.parentElement?.parentElement) {
+        return {
+          container: rightSideButton.parentElement.parentElement,
+          before: rightSideButton.parentElement,
+          placement: "inline"
+        };
+      }
+    }
+    return null;
+  }
+
+  function placeImportButton(wrap, anchor) {
+    if (anchor?.container) {
+      setClassPresenceIfChanged(wrap, "__xposter_import_fallback", false);
+      setDatasetValueIfChanged(wrap, "placement", anchor.placement || "inline");
+      const before = anchor.before && anchor.before !== wrap ? anchor.before : null;
+      if (wrap.parentElement !== anchor.container || (before && wrap.nextElementSibling !== before)) {
+        anchor.container.insertBefore(wrap, before);
+      }
+      return;
+    }
+    setDatasetValueIfChanged(wrap, "placement", "fallback");
+    setClassPresenceIfChanged(wrap, "__xposter_import_fallback", true);
+    if (wrap.parentElement !== document.body) document.body.appendChild(wrap);
+  }
+
+  function syncImportButtonCopy() {
+    const button = document.getElementById(IMPORT_BUTTON_ID);
+    if (!button) return;
+    const label = button.querySelector(".__xposter_import_label");
+    const title = translateContentText("Import Markdown with xPoster");
+    setTextContentIfChanged(label, translateContentText("Import Markdown"));
+    setAttributeValueIfChanged(button, "title", title);
+    setAttributeValueIfChanged(button, "aria-label", title);
+  }
+
+  function syncImportButtonState() {
+    const button = document.getElementById(IMPORT_BUTTON_ID);
+    if (!button) return;
+    setBooleanPropertyIfChanged(button, "disabled", Boolean(state.busy));
+    setDatasetValueIfChanged(button, "busy", String(Boolean(state.busy)));
+  }
+
+  function isElementVisible(element) {
+    if (!element) return false;
+    const rect = element.getBoundingClientRect();
+    if (rect.width < 4 || rect.height < 4) return false;
+    const style = getComputedStyle(element);
+    return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
   }
 
   function injectImportButtonStyles() {
@@ -3433,28 +3550,217 @@
     const style = document.createElement("style");
     style.id = "__xposter_import_style__";
     style.textContent = `
-      #${IMPORT_BUTTON_ID}_wrap { display: inline-flex; align-items: center; margin-right: 4px; }
-      #${IMPORT_BUTTON_ID} {
-        width: 38px;
-        height: 38px;
-        border: 0;
-        border-radius: 999px;
-        display: grid;
-        place-items: center;
-        background: transparent;
-        color: currentColor;
-        cursor: pointer;
+      #${IMPORT_BUTTON_ID}_wrap {
+        display: inline-flex;
+        align-items: center;
+        min-height: 44px;
+        margin-right: 8px;
+        flex: 0 0 auto;
       }
-      #${IMPORT_BUTTON_ID}:hover { background: rgba(127, 127, 127, 0.14); }
-      #${IMPORT_BUTTON_ID} svg { width: 21px; height: 21px; fill: currentColor; }
+      #${IMPORT_BUTTON_ID}_wrap.__xposter_import_fallback {
+        position: fixed;
+        z-index: 2147483646;
+        top: 18px;
+        right: 18px;
+        margin: 0;
+        pointer-events: auto;
+      }
+      #${IMPORT_BUTTON_ID} {
+        min-width: 0;
+        min-height: 36px;
+        min-width: 44px;
+        border: 1px solid rgba(83, 100, 113, 0.28);
+        border-radius: 999px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
+        padding: 0 12px 0 10px;
+        background: rgba(239, 243, 244, 0.82);
+        color: rgb(15, 20, 25);
+        cursor: pointer;
+        font: 700 13px/1 ui-sans-serif, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif;
+        letter-spacing: 0;
+        white-space: nowrap;
+        box-shadow: none;
+        transition: background-color 150ms ease, border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+      }
+      #${IMPORT_BUTTON_ID}:hover {
+        background: rgba(229, 234, 236, 0.98);
+        border-color: rgba(83, 100, 113, 0.42);
+      }
+      #${IMPORT_BUTTON_ID}:active {
+        transform: translateY(1px);
+      }
+      #${IMPORT_BUTTON_ID}:focus-visible {
+        outline: 2px solid #1d9bf0;
+        outline-offset: 2px;
+      }
+      #${IMPORT_BUTTON_ID}:disabled {
+        cursor: wait;
+        opacity: 0.58;
+        transform: none;
+      }
+      #${IMPORT_BUTTON_ID} svg {
+        width: 18px;
+        height: 18px;
+        flex: 0 0 auto;
+        fill: currentColor;
+      }
+      #${IMPORT_BUTTON_ID} .__xposter_import_label {
+        display: inline-block;
+      }
+      #${IMPORT_BUTTON_ID}_wrap.__xposter_import_fallback #${IMPORT_BUTTON_ID} {
+        background: rgba(255, 255, 255, 0.96);
+        border-color: rgba(207, 217, 222, 0.92);
+        box-shadow: 0 10px 28px rgba(15, 20, 25, 0.12);
+      }
+      @media (prefers-color-scheme: dark) {
+        #${IMPORT_BUTTON_ID} {
+          background: rgba(39, 44, 48, 0.86);
+          border-color: rgba(113, 118, 123, 0.42);
+          color: rgb(239, 243, 244);
+          box-shadow: none;
+        }
+        #${IMPORT_BUTTON_ID}:hover {
+          background: rgba(47, 51, 54, 0.98);
+          border-color: rgba(113, 118, 123, 0.58);
+        }
+        #${IMPORT_BUTTON_ID}_wrap.__xposter_import_fallback #${IMPORT_BUTTON_ID} {
+          background: rgba(22, 24, 28, 0.96);
+          border-color: rgba(83, 100, 113, 0.78);
+          box-shadow: 0 14px 34px rgba(0, 0, 0, 0.32);
+        }
+      }
+      @media (max-width: 520px) {
+        #${IMPORT_BUTTON_ID} {
+          width: 44px;
+          height: 44px;
+          padding: 0;
+          gap: 0;
+        }
+        #${IMPORT_BUTTON_ID} .__xposter_import_label {
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          overflow: hidden;
+          clip: rect(0 0 0 0);
+          white-space: nowrap;
+        }
+        #${IMPORT_BUTTON_ID}_wrap.__xposter_import_fallback {
+          top: 12px;
+          right: 12px;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #${IMPORT_BUTTON_ID} {
+          transition: none;
+        }
+        #${IMPORT_BUTTON_ID}:active {
+          transform: none;
+        }
+      }
+      #${IMPORT_CONFIRM_ID} {
+        --__xposter-import-confirm-paper: #ffffff;
+        --__xposter-import-confirm-ink: #0f1419;
+        --__xposter-import-confirm-muted: #536471;
+        --__xposter-import-confirm-line: #cfd9de;
+        position: fixed;
+        z-index: 2147483647;
+        width: min(320px, calc(100vw - 24px));
+        display: grid;
+        gap: 10px;
+        padding: 12px;
+        border: 1px solid var(--__xposter-import-confirm-line);
+        border-radius: 8px;
+        background: var(--__xposter-import-confirm-paper);
+        color: var(--__xposter-import-confirm-ink);
+        box-shadow: 0 16px 34px rgba(15, 20, 25, 0.14);
+        font: 13px/1.4 ui-sans-serif, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif;
+        letter-spacing: 0;
+        animation: __xposter_import_confirm_in 160ms cubic-bezier(0.22, 1, 0.36, 1) both;
+      }
+      #${IMPORT_CONFIRM_ID} strong {
+        margin: 0;
+        color: var(--__xposter-import-confirm-ink);
+        font-size: 13px;
+        font-weight: 800;
+        line-height: 1.25;
+      }
+      #${IMPORT_CONFIRM_ID} p {
+        margin: 0;
+        color: var(--__xposter-import-confirm-muted);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+      #${IMPORT_CONFIRM_ID} .__xposter_import_confirm_actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+      #${IMPORT_CONFIRM_ID} button {
+        min-height: 32px;
+        border: 1px solid color-mix(in oklch, var(--__xposter-import-confirm-line), var(--__xposter-import-confirm-ink) 12%);
+        border-radius: 999px;
+        padding: 0 12px;
+        background: transparent;
+        color: var(--__xposter-import-confirm-ink);
+        cursor: pointer;
+        font: 700 12px/1 ui-sans-serif, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif;
+      }
+      #${IMPORT_CONFIRM_ID} button:hover {
+        background: rgba(15, 20, 25, 0.06);
+      }
+      #${IMPORT_CONFIRM_ID} button:focus-visible {
+        outline: 2px solid #1d9bf0;
+        outline-offset: 2px;
+      }
+      #${IMPORT_CONFIRM_ID} .__xposter_import_confirm_continue {
+        border-color: #1d9bf0;
+        background: #1d9bf0;
+        color: #f7f9f9;
+      }
+      #${IMPORT_CONFIRM_ID} .__xposter_import_confirm_continue:hover {
+        background: #1a8cd8;
+      }
+      @media (prefers-color-scheme: dark) {
+        #${IMPORT_CONFIRM_ID} {
+          --__xposter-import-confirm-paper: #121a22;
+          --__xposter-import-confirm-ink: #d6dee6;
+          --__xposter-import-confirm-muted: #8b99a6;
+          --__xposter-import-confirm-line: #33414d;
+          box-shadow: 0 18px 38px rgba(0, 0, 0, 0.34);
+        }
+        #${IMPORT_CONFIRM_ID} button:hover {
+          background: rgba(239, 243, 244, 0.08);
+        }
+      }
+      @keyframes __xposter_import_confirm_in {
+        from { opacity: 0; transform: translateY(-4px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #${IMPORT_CONFIRM_ID} {
+          animation: none;
+        }
+      }
     `;
     document.head.appendChild(style);
   }
 
-  function chooseMarkdownFile(origin) {
+  async function chooseMarkdownFile(origin) {
+    if (state.busy) {
+      showStatus("Import already running", "warn", 3000);
+      return;
+    }
+    if (!(await confirmArticleImportOverwrite())) {
+      showStatus("Markdown import cancelled.", "warn", 3000);
+      return;
+    }
     const input = document.createElement("input");
     input.type = "file";
     input.accept = ".md,.markdown,.mdown,.mkd,.txt,text/markdown,text/plain";
+    input.setAttribute("aria-label", translateContentText("Choose a Markdown file"));
     input.style.display = "none";
     input.addEventListener("change", async () => {
       const file = input.files?.[0];
@@ -3463,6 +3769,124 @@
     });
     document.body.appendChild(input);
     input.click();
+  }
+
+  function confirmArticleImportOverwrite() {
+    if (!isEditorRoute() || !findEditor() || !articleDraftHasMeaningfulContent()) return Promise.resolve(true);
+    return showImportOverwriteConfirm();
+  }
+
+  function showImportOverwriteConfirm() {
+    document.getElementById(IMPORT_CONFIRM_ID)?.remove();
+    return new Promise((resolve) => {
+      const panel = document.createElement("section");
+      panel.id = IMPORT_CONFIRM_ID;
+      panel.setAttribute("role", "alertdialog");
+      panel.setAttribute("aria-modal", "false");
+      panel.setAttribute("aria-labelledby", `${IMPORT_CONFIRM_ID}_title`);
+      panel.setAttribute("aria-describedby", `${IMPORT_CONFIRM_ID}_detail`);
+      panel.innerHTML = `
+        <strong id="${IMPORT_CONFIRM_ID}_title"></strong>
+        <p id="${IMPORT_CONFIRM_ID}_detail"></p>
+        <div class="__xposter_import_confirm_actions">
+          <button class="__xposter_import_confirm_cancel" type="button"></button>
+          <button class="__xposter_import_confirm_continue" type="button"></button>
+        </div>
+      `;
+      const title = panel.querySelector("strong");
+      const detail = panel.querySelector("p");
+      const cancel = panel.querySelector(".__xposter_import_confirm_cancel");
+      const proceed = panel.querySelector(".__xposter_import_confirm_continue");
+      setTextContentIfChanged(title, translateContentText("Replace current draft?"));
+      setTextContentIfChanged(detail, translateContentText("Importing Markdown will replace the title or body already in this X Article draft."));
+      setTextContentIfChanged(cancel, translateContentText("Cancel"));
+      setTextContentIfChanged(proceed, translateContentText("Continue import"));
+      const finish = (ok) => {
+        window.removeEventListener("keydown", onKeyDown, true);
+        window.removeEventListener("resize", onResize);
+        panel.remove();
+        resolve(Boolean(ok));
+      };
+      const onKeyDown = (event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          finish(false);
+        }
+      };
+      const onResize = () => positionImportConfirmPanel(panel);
+      cancel.addEventListener("click", () => finish(false));
+      proceed.addEventListener("click", () => finish(true));
+      window.addEventListener("keydown", onKeyDown, true);
+      window.addEventListener("resize", onResize, { passive: true });
+      document.body.appendChild(panel);
+      positionImportConfirmPanel(panel);
+      window.setTimeout(() => proceed.focus(), 0);
+    });
+  }
+
+  function positionImportConfirmPanel(panel) {
+    if (!panel) return;
+    const trigger = document.getElementById(IMPORT_BUTTON_ID);
+    const rect = trigger?.getBoundingClientRect?.();
+    const width = Math.min(320, Math.max(0, window.innerWidth - 24));
+    const left = rect
+      ? Math.min(window.innerWidth - width - 12, Math.max(12, rect.right - width))
+      : Math.max(12, window.innerWidth - width - 18);
+    const top = rect
+      ? Math.max(12, Math.min(window.innerHeight - 124, Math.max(12, rect.bottom + 8)))
+      : Math.max(12, Math.min(64, window.innerHeight - 124));
+    setStylePropertyIfChanged(panel, "left", `${Math.round(left)}px`);
+    setStylePropertyIfChanged(panel, "top", `${Math.round(top)}px`);
+  }
+
+  function articleDraftHasMeaningfulContent() {
+    return articleEditorHasMeaningfulContent() || articleTitleHasMeaningfulContent();
+  }
+
+  function articleEditorHasMeaningfulContent() {
+    const editor = findEditor();
+    if (!editor) return false;
+    const text = meaningfulElementText(editor);
+    return Boolean(text && !/^(?:write(?: something)?|start writing|body|article|正文|写点什么|添加正文|添加文章正文)$/i.test(text));
+  }
+
+  function articleTitleHasMeaningfulContent() {
+    return articleTitleCandidates().some((element) => Boolean(meaningfulElementText(element)));
+  }
+
+  function articleTitleCandidates() {
+    const editor = findEditor();
+    return Array.from(document.querySelectorAll("input[type='text'], textarea, [contenteditable='true']")).filter((element) => {
+      if (element === editor || editor?.contains(element) || !isElementVisible(element)) return false;
+      return articleTitleElementScore(element) > 0;
+    });
+  }
+
+  function articleTitleElementScore(element) {
+    const haystack = [
+      element.getAttribute("aria-label"),
+      element.getAttribute("placeholder"),
+      element.getAttribute("data-testid")
+    ].filter(Boolean).join(" ").toLowerCase();
+    const rect = element.getBoundingClientRect();
+    let score = 0;
+    if (/(?:title|headline|标题)/i.test(haystack)) score += 10;
+    if (rect.top < 460) score += 2;
+    if (rect.width > 180) score += 1;
+    return score;
+  }
+
+  function meaningfulElementText(element) {
+    const raw = element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
+      ? element.value
+      : element.innerText || element.textContent || "";
+    const text = normalizeText(String(raw || "").replace(/\u200b/g, ""));
+    if (!text) return "";
+    const placeholders = [
+      element.getAttribute("placeholder"),
+      element.getAttribute("aria-label")
+    ].map((value) => normalizeText(value || "")).filter(Boolean);
+    return placeholders.some((placeholder) => text === placeholder) ? "" : text;
   }
 
   function installDragDrop() {

@@ -836,28 +836,40 @@
             <button class="secondary compact danger" id="clearVaultSettings" disabled data-i18n="Clear">Clear</button>
           </div>
         </div>
-        <div class="setting-row setting-row-stack">
+        <div class="setting-row setting-row-stack setting-row-import">
           <div>
-            <strong data-i18n="Title and cover">Title and cover</strong>
-            <span data-i18n="Choose what xPoster writes into X Article metadata.">Choose what xPoster writes into X Article metadata.</span>
+            <strong data-i18n="Article import">Article import</strong>
+            <span data-i18n="Choose metadata and safe text cleanup before writing to X.">Choose metadata and safe text cleanup before writing to X.</span>
           </div>
-          <fieldset class="setting-checks" id="metadataOptions" aria-label="Title and cover" data-i18n-aria-label="Title and cover">
-            <legend class="visually-hidden" data-i18n="Title and cover">Title and cover</legend>
-            <label>
-              <input type="checkbox" id="importTitleOption" checked />
-              <span>
-                <strong data-i18n="Set article title">Set article title</strong>
-                <em data-i18n="Use frontmatter title or the first H1.">Use frontmatter title or the first H1.</em>
-              </span>
-            </label>
-            <label>
-              <input type="checkbox" id="importCoverOption" checked />
-              <span>
-                <strong data-i18n="Set article cover">Set article cover</strong>
-                <em data-i18n="Use frontmatter cover or the first image.">Use frontmatter cover or the first image.</em>
-              </span>
-            </label>
-          </fieldset>
+          <div class="setting-option-groups">
+            <fieldset class="setting-checks" id="metadataOptions" aria-label="Title and cover" data-i18n-aria-label="Title and cover">
+              <legend class="setting-checks-heading" data-i18n="Title and cover">Title and cover</legend>
+              <label>
+                <input type="checkbox" id="importTitleOption" checked />
+                <span>
+                  <strong data-i18n="Set article title">Set article title</strong>
+                  <em data-i18n="Use frontmatter title or the first H1.">Use frontmatter title or the first H1.</em>
+                </span>
+              </label>
+              <label>
+                <input type="checkbox" id="importCoverOption" checked />
+                <span>
+                  <strong data-i18n="Set article cover">Set article cover</strong>
+                  <em data-i18n="Use frontmatter cover or the first image.">Use frontmatter cover or the first image.</em>
+                </span>
+              </label>
+            </fieldset>
+            <fieldset class="setting-checks" id="draftProcessingOptions" aria-label="Text cleanup" data-i18n-aria-label="Text cleanup">
+              <legend class="setting-checks-heading" data-i18n="Text cleanup">Text cleanup</legend>
+              <label>
+                <input type="checkbox" id="smartPunctuationOption" />
+                <span>
+                  <strong data-i18n="Smart punctuation">Smart punctuation</strong>
+                  <em data-i18n="Fix visible Chinese punctuation while leaving code, links, and URLs unchanged.">Fix visible Chinese punctuation while leaving code, links, and URLs unchanged.</em>
+                </span>
+              </label>
+            </fieldset>
+          </div>
         </div>
         <div class="setting-row setting-row-stack">
           <div>

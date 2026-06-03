@@ -5126,6 +5126,26 @@ textarea:not(#markdown):focus-visible,
   border: 0;
 }
 
+.setting-option-groups {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.setting-option-groups .setting-checks + .setting-checks {
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in oklch, var(--line), transparent 50%);
+}
+
+.setting-checks-heading {
+  margin: 0 0 2px;
+  padding: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 820;
+  line-height: 1.2;
+}
+
 .setting-checks label {
   position: relative;
   display: grid;

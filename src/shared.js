@@ -144,12 +144,212 @@
     return markdownTitleCandidateFromFileName(options.sourceFileName || options.fileName || "");
   }
 
+  const SMART_PUNCT_MASK_OPEN = "\uE000";
+  const SMART_PUNCT_MASK_CLOSE = "\uE001";
+  const SMART_PUNCT_PROTECTED_PATTERNS = [
+    /https?:\/\/[^\s<>"')）]+/gi,
+    /\bwww\.[^\s<>"')）]+/gi,
+    /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g,
+    /(?:\.{0,2}\/|~\/|[A-Za-z]:[\\/])?[A-Za-z0-9_.-]+(?:[\\/][A-Za-z0-9_.-]+)+/g
+  ];
+  const SMART_PUNCT_CONTEXT_RE = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]/u;
+  const SMART_PUNCT_CJK_RUN = "[\\u3040-\\u30ff\\u3400-\\u4dbf\\u4e00-\\u9fff\\uf900-\\ufaff\\uac00-\\ud7af]";
+  const SMART_PUNCT_ENUM_RE = new RegExp(`${SMART_PUNCT_CJK_RUN}{1,6}(?:,${SMART_PUNCT_CJK_RUN}{1,6}){2,}`, "gu");
+  const SMART_PUNCT_CLOSERS = "”’）」』》】〉〕｝";
+  const SMART_PUNCT_PAIR_FULL = new Map([
+    [",", "，"],
+    [";", "；"],
+    [":", "："],
+    ["!", "！"],
+    ["?", "？"]
+  ]);
+  const SMART_PUNCT_CLAUSE_STARTERS = [
+    "因为", "所以", "但是", "可是", "不过", "然后", "因此", "于是",
+    "虽然", "如果", "而且", "并且", "接着", "同时", "由于", "除非",
+    "使得", "导致", "从而"
+  ];
+
+  function isSmartPunctuationContextChar(char) {
+    if (!char) return false;
+    const code = char.charCodeAt(0);
+    return (
+      (code >= 0x3040 && code <= 0x30ff) ||
+      (code >= 0x3400 && code <= 0x4dbf) ||
+      (code >= 0x4e00 && code <= 0x9fff) ||
+      (code >= 0xac00 && code <= 0xd7af) ||
+      (code >= 0xf900 && code <= 0xfaff) ||
+      (code >= 0x3000 && code <= 0x303f) ||
+      (code >= 0xff00 && code <= 0xffef)
+    );
+  }
+
+  function smartPunctuationPrevNonspace(text, index) {
+    let cursor = index - 1;
+    while (cursor >= 0 && /[ \t]/.test(text[cursor])) cursor -= 1;
+    return cursor >= 0 ? text[cursor] : "";
+  }
+
+  function smartPunctuationNextNonspace(text, index) {
+    let cursor = index + 1;
+    while (cursor < text.length && /[ \t]/.test(text[cursor])) cursor += 1;
+    return cursor < text.length ? text[cursor] : "";
+  }
+
+  function smartPunctuationPrevContentChar(text, index) {
+    let cursor = index - 1;
+    while (cursor >= 0 && (/[ \t]/.test(text[cursor]) || SMART_PUNCT_CLOSERS.includes(text[cursor]))) {
+      cursor -= 1;
+    }
+    return cursor >= 0 ? text[cursor] : "";
+  }
+
+  function isAsciiDigit(char) {
+    return char >= "0" && char <= "9";
+  }
+
+  function isAsciiWordContextChar(char) {
+    return Boolean(char && /[A-Za-z0-9_]/.test(char));
+  }
+
+  function shouldUseSmartPunctuationFullwidth(previousContent, nextContent, { terminal = false } = {}) {
+    const previousIsCjk = isSmartPunctuationContextChar(previousContent);
+    const nextIsCjk = isSmartPunctuationContextChar(nextContent);
+    if (previousIsCjk && nextIsCjk) return true;
+    if (terminal && previousIsCjk && !isAsciiWordContextChar(nextContent)) return true;
+    return false;
+  }
+
+  function maskSmartPunctuationProtectedText(text) {
+    const store = [];
+    const stash = (match) => {
+      const index = store.length;
+      store.push(match);
+      return `${SMART_PUNCT_MASK_OPEN}${index}${SMART_PUNCT_MASK_CLOSE}`;
+    };
+    let masked = String(text ?? "");
+    for (const pattern of SMART_PUNCT_PROTECTED_PATTERNS) {
+      masked = masked.replace(pattern, stash);
+    }
+    return { masked, store };
+  }
+
+  function unmaskSmartPunctuationProtectedText(text, store) {
+    const tokenPattern = new RegExp(`${SMART_PUNCT_MASK_OPEN}(\\d+)${SMART_PUNCT_MASK_CLOSE}`, "g");
+    return String(text ?? "").replace(tokenPattern, (_, index) => store[Number(index)] || "");
+  }
+
+  function normalizeSmartPunctuationText(value) {
+    const source = String(value ?? "");
+    if (!source) return source;
+    const { masked, store } = maskSmartPunctuationProtectedText(source);
+    let text = masked.replace(/\u3000/g, " ");
+
+    text = text.replace(/\.{3,}/g, (match, offset) =>
+      isSmartPunctuationContextChar(smartPunctuationPrevNonspace(text, offset)) ||
+        isSmartPunctuationContextChar(smartPunctuationNextNonspace(text, offset + match.length - 1))
+        ? "……"
+        : match
+    );
+
+    text = text.replace(SMART_PUNCT_ENUM_RE, (match) => {
+      const items = match.split(",");
+      if (items.some((item) => SMART_PUNCT_CLAUSE_STARTERS.some((starter) => item.startsWith(starter)))) {
+        return match;
+      }
+      return match.replace(/,/g, "、");
+    });
+
+    text = text.replace(/"([^"\n]*)"/g, (match, inner, offset) => {
+      const before = offset > 0 ? text[offset - 1] : "";
+      const after = offset + match.length < text.length ? text[offset + match.length] : "";
+      return isSmartPunctuationContextChar(before) ||
+        isSmartPunctuationContextChar(after) ||
+        SMART_PUNCT_CONTEXT_RE.test(inner)
+        ? `“${inner}”`
+        : match;
+    });
+
+    text = text.replace(/'([^'\n]*)'/g, (match, inner) =>
+      SMART_PUNCT_CONTEXT_RE.test(inner) ? `‘${inner}’` : match
+    );
+
+    text = text.replace(/\(([^()\n]*)\)/g, (match, inner, offset) => {
+      const before = offset > 0 ? text[offset - 1] : "";
+      const after = offset + match.length < text.length ? text[offset + match.length] : "";
+      return isSmartPunctuationContextChar(before) ||
+        isSmartPunctuationContextChar(after) ||
+        SMART_PUNCT_CONTEXT_RE.test(inner)
+        ? `（${inner}）`
+        : match;
+    });
+
+    const output = [];
+    for (let index = 0; index < text.length; index += 1) {
+      const char = text[index];
+      if (SMART_PUNCT_PAIR_FULL.has(char)) {
+        const previous = index > 0 ? text[index - 1] : "";
+        const next = index + 1 < text.length ? text[index + 1] : "";
+        const previousContent = smartPunctuationPrevContentChar(text, index);
+        const nextContent = smartPunctuationNextNonspace(text, index);
+
+        if ((char === "," || char === ":") && isAsciiDigit(previous) && isAsciiDigit(next)) {
+          output.push(char);
+          continue;
+        }
+        if (char === ":") {
+          output.push(shouldUseSmartPunctuationFullwidth(previousContent, nextContent) ? "：" : char);
+          continue;
+        }
+        output.push(
+          shouldUseSmartPunctuationFullwidth(previousContent, nextContent, { terminal: char === "!" || char === "?" })
+            ? SMART_PUNCT_PAIR_FULL.get(char)
+            : char
+        );
+        continue;
+      }
+
+      if (char === ".") {
+        const previous = index > 0 ? text[index - 1] : "";
+        const next = index + 1 < text.length ? text[index + 1] : "";
+        if ((isAsciiDigit(previous) && isAsciiDigit(next)) || previous === "." || next === ".") {
+          output.push(char);
+          continue;
+        }
+        output.push(shouldUseSmartPunctuationFullwidth(
+          smartPunctuationPrevContentChar(text, index),
+          smartPunctuationNextNonspace(text, index),
+          { terminal: true }
+        ) ? "。" : char);
+        continue;
+      }
+
+      output.push(char);
+    }
+
+    text = output.join("");
+    text = text.replace(/-{2,}|—+/g, (match, offset) =>
+      isSmartPunctuationContextChar(smartPunctuationPrevNonspace(text, offset)) ||
+        isSmartPunctuationContextChar(smartPunctuationNextNonspace(text, offset + match.length - 1))
+        ? "——"
+        : match
+    );
+
+    return unmaskSmartPunctuationProtectedText(text, store);
+  }
+
   function parseMarkdown(markdown, options = {}) {
     const extractTitle = options.extractTitle !== false && options.setTitle !== false;
     const extractCover = options.extractCover !== false && options.setCover !== false;
+    const smartPunctuation = options.smartPunctuation === true;
     const { body, meta } = parseFrontmatter(markdown);
-    const titleFromMeta = meta.title || meta.Title || meta["标题"] || null;
-    const titleCandidate = extractTitle ? markdownTitleCandidateFromOptions(options) : "";
+    const titleFromMetaRaw = meta.title || meta.Title || meta["标题"] || null;
+    const titleFromMeta = titleFromMetaRaw && smartPunctuation
+      ? normalizeSmartPunctuationText(titleFromMetaRaw)
+      : titleFromMetaRaw;
+    const titleCandidateRaw = extractTitle ? markdownTitleCandidateFromOptions(options) : "";
+    const titleCandidate = titleCandidateRaw && smartPunctuation
+      ? normalizeSmartPunctuationText(titleCandidateRaw)
+      : titleCandidateRaw;
     let cover = extractCover ? meta.cover || meta.Cover || meta["封面"] || null : null;
     if (cover) {
       cover = cover
@@ -158,17 +358,17 @@
         .trim();
     }
 
-    const spans = findSpecialBlocks(body);
+    const spans = findSpecialBlocks(body, options);
     const segments = [];
     let cursor = 0;
     for (const span of spans) {
       if (span.start > cursor) {
-        segments.push(...parseTextBlocks(body.slice(cursor, span.start)));
+        segments.push(...parseTextBlocks(body.slice(cursor, span.start), options));
       }
       segments.push(span.segment);
       cursor = span.end;
     }
-    if (cursor < body.length) segments.push(...parseTextBlocks(body.slice(cursor)));
+    if (cursor < body.length) segments.push(...parseTextBlocks(body.slice(cursor), options));
 
     let title = extractTitle ? titleFromMeta : null;
     let titleSource = title ? "frontmatter" : "";
@@ -202,7 +402,7 @@
     };
   }
 
-  function findSpecialBlocks(markdown) {
+  function findSpecialBlocks(markdown, options = {}) {
     const spans = [];
     let match;
 
@@ -222,7 +422,7 @@
     const table = /^(?:[ \t]*\|.+\|[ \t]*\n)(?:[ \t]*\|[\s:|\-]+\|[ \t]*\n)((?:[ \t]*\|.+\|[ \t]*\n?)*)/gm;
     while ((match = table.exec(markdown)) !== null) {
       if (overlaps(spans, match.index)) continue;
-      const parsed = parseTable(match[0]);
+      const parsed = parseTable(match[0], options);
       if (!parsed) continue;
       spans.push({
         start: match.index,
@@ -359,12 +559,15 @@
     return spans.some((span) => index >= span.start && index < span.end);
   }
 
-  function parseTable(block) {
+  function parseTable(block, options = {}) {
+    const normalizeCell = options.smartPunctuation === true
+      ? normalizeSmartPunctuationText
+      : (value) => value;
     const splitRow = (line) => {
       let cells = line.replace(/\\\|/g, "\0").split("|");
       if (cells[0]?.trim() === "") cells = cells.slice(1);
       if (cells[cells.length - 1]?.trim() === "") cells = cells.slice(0, -1);
-      return cells.map((cell) => cell.replace(/\0/g, "|").trim());
+      return cells.map((cell) => normalizeCell(cell.replace(/\0/g, "|").trim()));
     };
 
     const lines = block
@@ -393,14 +596,14 @@
     return { headers, alignments, rows };
   }
 
-  function parseTextBlocks(text) {
+  function parseTextBlocks(text, options = {}) {
     const lines = text.split("\n");
     const segments = [];
     let paragraph = [];
 
     const flush = () => {
       const value = paragraph.join("\n").trim();
-      if (value) segments.push(parseInline("unstyled", value));
+      if (value) segments.push(parseInline("unstyled", value, options));
       paragraph = [];
     };
 
@@ -422,22 +625,22 @@
           "header-five",
           "header-six"
         ][match[1].length];
-        segments.push(parseInline(kind, match[2].trim()));
+        segments.push(parseInline(kind, match[2].trim(), options));
         continue;
       }
       if ((match = trimmed.match(/^>\s+(.+)$/))) {
         flush();
-        segments.push(parseInline("blockquote", match[1].trim()));
+        segments.push(parseInline("blockquote", match[1].trim(), options));
         continue;
       }
       if ((match = trimmed.match(/^[-*+]\s+(.+)$/))) {
         flush();
-        segments.push(parseInline("unordered-list-item", match[1].trim()));
+        segments.push(parseInline("unordered-list-item", match[1].trim(), options));
         continue;
       }
       if ((match = trimmed.match(/^\d+\.\s+(.+)$/))) {
         flush();
-        segments.push(parseInline("ordered-list-item", match[1].trim()));
+        segments.push(parseInline("ordered-list-item", match[1].trim(), options));
         continue;
       }
       paragraph.push(trimmed);
@@ -447,15 +650,24 @@
     return segments;
   }
 
-  function parseInline(kind, source) {
+  function parseInline(kind, source, options = {}) {
     const result = { type: "text", kind, text: "", inlineStyleRanges: [], links: [] };
     let cursor = 0;
+    let plain = "";
 
-    const appendStyled = (text, styles) => {
+    const normalizeVisibleText = (text) =>
+      options.smartPunctuation === true ? normalizeSmartPunctuationText(text) : String(text ?? "");
+    const appendPlain = () => {
+      if (!plain) return;
+      result.text += normalizeVisibleText(plain);
+      plain = "";
+    };
+    const appendStyled = (text, styles, { normalize = true } = {}) => {
+      const value = normalize ? normalizeVisibleText(text) : String(text ?? "");
       const offset = result.text.length;
-      result.text += text;
+      result.text += value;
       for (const style of styles) {
-        result.inlineStyleRanges.push({ offset, length: text.length, style });
+        result.inlineStyleRanges.push({ offset, length: value.length, style });
       }
     };
 
@@ -465,9 +677,11 @@
       if (char === "[") {
         const link = source.slice(cursor).match(/^\[([^\]]+)\]\(([^)]+)\)/);
         if (link) {
+          appendPlain();
+          const label = normalizeVisibleText(link[1]);
           const offset = result.text.length;
-          result.text += link[1];
-          result.links.push({ offset, length: link[1].length, url: link[2] });
+          result.text += label;
+          result.links.push({ offset, length: label.length, url: link[2] });
           cursor += link[0].length;
           continue;
         }
@@ -483,6 +697,7 @@
         if (!source.startsWith(rule.marker, cursor)) continue;
         const end = source.indexOf(rule.marker, cursor + rule.marker.length);
         if (end <= cursor) continue;
+        appendPlain();
         appendStyled(source.slice(cursor + rule.marker.length, end), rule.styles);
         cursor = end + rule.marker.length;
         matched = true;
@@ -493,6 +708,7 @@
       if ((char === "*" || char === "_") && source[cursor + 1] !== char) {
         const end = source.indexOf(char, cursor + 1);
         if (end > cursor && source[end + 1] !== char) {
+          appendPlain();
           appendStyled(source.slice(cursor + 1, end), ["Italic"]);
           cursor = end + 1;
           continue;
@@ -502,16 +718,18 @@
       if (char === "`") {
         const end = source.indexOf("`", cursor + 1);
         if (end > cursor) {
-          appendStyled(source.slice(cursor + 1, end), ["Code"]);
+          appendPlain();
+          appendStyled(source.slice(cursor + 1, end), ["Code"], { normalize: false });
           cursor = end + 1;
           continue;
         }
       }
 
-      result.text += char;
+      plain += char;
       cursor += 1;
     }
 
+    appendPlain();
     return result;
   }
 

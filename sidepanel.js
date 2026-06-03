@@ -130,7 +130,7 @@
   let writeButtonRevealTimer = null;
   let importCancelRequested = false;
   let uploadRetryRequested = false;
-  let importOptions = { setTitle: true, setCover: true };
+  let importOptions = { setTitle: true, setCover: true, smartPunctuation: false };
   let successFeedbackOptions = { confetti: true, sound: true, soundStyle: "soft" };
   let articleExportOptions = { enabled: true, mode: "copy" };
   let successAudioContext = null;
@@ -291,6 +291,7 @@
     return {
       setTitle: options.setTitle !== false,
       setCover: options.setCover !== false,
+      smartPunctuation: options.smartPunctuation === true,
       ...titleCandidateOptions(options)
     };
   }
@@ -835,6 +836,7 @@
   function syncImportOptionsControls() {
     setBooleanPropertyIfChanged(els.importTitleOption, "checked", importOptions.setTitle !== false);
     setBooleanPropertyIfChanged(els.importCoverOption, "checked", importOptions.setCover !== false);
+    setBooleanPropertyIfChanged(els.smartPunctuationOption, "checked", importOptions.smartPunctuation === true);
   }
 
   function applyImportOptions(options = importOptions, { refresh = true } = {}) {
@@ -8279,8 +8281,15 @@
   });
   els.metadataOptions?.addEventListener("change", () => {
     setImportOptions({
+      ...importOptions,
       setTitle: els.importTitleOption?.checked !== false,
       setCover: els.importCoverOption?.checked !== false
+    });
+  });
+  els.draftProcessingOptions?.addEventListener("change", () => {
+    setImportOptions({
+      ...importOptions,
+      smartPunctuation: els.smartPunctuationOption?.checked === true
     });
   });
   els.articleExportOptions?.addEventListener("change", () => {

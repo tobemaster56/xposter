@@ -139,6 +139,8 @@
     "metadataOptions",
     "importTitleOption",
     "importCoverOption",
+    "draftProcessingOptions",
+    "smartPunctuationOption",
     "articleExportOptions",
     "articleExportOption",
     "successFeedbackOptions",

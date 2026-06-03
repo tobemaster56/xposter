@@ -123,6 +123,44 @@ const disabledFileTitleParsed = shared.parseMarkdown("Body text only", { setTitl
 const coverDisabledParsed = shared.parseMarkdown("![cover](https://images.example.test/path/cover.png)\n\nBody text.", {
   setCover: false
 });
+const smartPunctuationInput = [
+  "# 标题,好吗?",
+  "",
+  "他说\"对\". 产品,渠道,服务 -- 继续... Node.js 3.14 12:30 1,000",
+  "",
+  "[链接,测试](https://example.test/a,b?q=1,2)",
+  "",
+  "![图,测试](https://images.example.test/a,b.png)",
+  "",
+  "| 列 | 值 |",
+  "| --- | --- |",
+  "| 单元格,好吗? | Node.js |",
+  "",
+  "```js",
+  "const 文案 = \"这是测试,对吧.\";",
+  "fn(a, b);",
+  "```",
+  "",
+  "行内 `const 文案 = \"这是测试,对吧.\"; fn(a, b)` 结束,好吗?"
+].join("\n");
+const smartPunctuationOffParsed = shared.parseMarkdown("这是测试,对吧.", { smartPunctuation: false });
+const smartPunctuationParsed = shared.parseMarkdown(smartPunctuationInput, { smartPunctuation: true });
+const smartPunctuationMixedParsed = shared.parseMarkdown(
+  "版本 React 18.2, 比例 16:9. 英文句子, with Chinese 中文, maybe risky. 函数 fn(a, b) 的返回值是 true, 对吗?",
+  { smartPunctuation: true, setTitle: false }
+);
+const smartPunctuationParagraph = smartPunctuationParsed.segments.find(
+  (segment) => segment.type === "text" && segment.text.startsWith("他说")
+);
+const smartPunctuationLink = smartPunctuationParsed.segments.find(
+  (segment) => segment.type === "text" && segment.links?.length
+);
+const smartPunctuationImage = smartPunctuationParsed.segments.find((segment) => segment.type === "image");
+const smartPunctuationTable = smartPunctuationParsed.segments.find((segment) => segment.type === "table");
+const smartPunctuationCode = smartPunctuationParsed.segments.find((segment) => segment.type === "code");
+const smartPunctuationInline = smartPunctuationParsed.segments.find(
+  (segment) => segment.type === "text" && segment.text.startsWith("行内")
+);
 const coverOnlyPlan = shared.buildPastePlan(
   frontmatterOnlyCoverParsed.segments,
   new Map(),
@@ -658,6 +696,39 @@ assert.equal(
   1,
   "disabled cover extraction should keep image blocks in the body"
 );
+assert.equal(smartPunctuationOffParsed.segments[0]?.text, "这是测试,对吧.", "smart punctuation should be off by default when disabled");
+assert.equal(smartPunctuationParsed.title, "标题，好吗？", "smart punctuation should normalize H1-derived titles");
+assert.equal(
+  smartPunctuationParagraph?.text,
+  "他说“对”。 产品、渠道、服务 —— 继续…… Node.js 3.14 12:30 1,000",
+  "smart punctuation should normalize Chinese-context prose while preserving version, decimal, time, and thousands punctuation"
+);
+assert.equal(smartPunctuationLink?.text, "链接，测试", "smart punctuation should normalize Markdown link display text");
+assert.deepEqual(
+  smartPunctuationLink?.links?.[0],
+  { offset: 0, length: "链接，测试".length, url: "https://example.test/a,b?q=1,2" },
+  "smart punctuation should preserve Markdown link URLs and link offsets"
+);
+assert.equal(smartPunctuationImage?.source, "https://images.example.test/a,b.png", "smart punctuation should not alter image sources");
+assert.equal(smartPunctuationTable?.rows?.[0]?.[0], "单元格，好吗？", "smart punctuation should normalize visible table cells");
+assert.equal(
+  smartPunctuationCode?.code,
+  "const 文案 = \"这是测试,对吧.\";\nfn(a, b);",
+  "smart punctuation should not alter fenced code blocks"
+);
+assert.ok(
+  smartPunctuationInline?.text.includes('const 文案 = "这是测试,对吧."; fn(a, b)'),
+  "smart punctuation should not alter inline code text"
+);
+assert.ok(
+  smartPunctuationInline?.text.endsWith("结束，好吗？"),
+  "smart punctuation should still normalize prose around inline code"
+);
+assert.equal(
+  smartPunctuationMixedParsed.segments[0]?.text,
+  "版本 React 18.2, 比例 16:9. 英文句子, with Chinese 中文, maybe risky. 函数 fn(a, b) 的返回值是 true, 对吗？",
+  "smart punctuation should preserve mixed English technical punctuation while still normalizing Chinese sentence endings"
+);
 assert.ok(counts.image >= 1, "fixture should include an image");
 assert.ok(counts.table >= 1, "fixture should include a table");
 assert.ok(counts.tweet >= 1, "fixture should include a tweet");
@@ -758,6 +829,7 @@ assert.ok(
 assert.ok(
   includesAll(contentScriptText, [
     "function titleCandidateOptions",
+    "smartPunctuation: options.smartPunctuation === true",
     "options.titleCandidate || options.fallbackTitle || options.sourceTitle",
     "sourceFileName: pending?.fileName || sourceFileName",
     "sourceFileName: stored?.fileName || sourceFileName",
@@ -770,6 +842,34 @@ assert.ok(
   "content script should preserve source filenames through direct Markdown file imports, pending navigation, preflight, and side-panel queue titles"
 );
 assert.ok(
+  includesAll(contentScriptText, [
+    "function syncImportButton",
+    "function findImportButtonAnchor",
+    "function confirmArticleImportOverwrite",
+    "function showImportOverwriteConfirm",
+    "function positionImportConfirmPanel",
+    "function articleDraftHasMeaningfulContent",
+    "function syncImportButtonCopy",
+    "setDatasetValueIfChanged(wrap, \"route\", isEditorRoute() ? \"editor\" : \"list\")",
+    "button.addEventListener(\"click\", () => chooseMarkdownFile(\"button\"));",
+    "const IMPORT_CONFIRM_ID = \"__xposter_import_confirm__\";",
+    "Replace current draft?",
+    "Continue import",
+    "\"Import Markdown\": \"导入 Markdown\"",
+    "\"Import Markdown with xPoster\": \"用 xPoster 导入 Markdown\"",
+    "__xposter_import_fallback",
+    "#${IMPORT_CONFIRM_ID}",
+    "@media (max-width: 520px)",
+    "input.accept = \".md,.markdown,.mdown,.mkd,.txt,text/markdown,text/plain\";"
+  ]) &&
+    excludesAll(contentScriptText, [
+      "if (!isArticleRoute() || isEditorRoute())",
+      "if (document.getElementById(IMPORT_BUTTON_ID)) return;",
+      "window.confirm("
+    ]),
+  "X Articles import button should be a localized top action on list and editor routes, with fallback placement and overwrite confirmation"
+);
+assert.ok(
   includesAll(sidepanelText, [
     "let activeDraftSourceFileName = \"\";",
     "function activeWriteSourceFileName",
@@ -779,6 +879,8 @@ assert.ok(
     "sourceFileName: writeSourceFileName",
     "return importMarkdownDraft(draftText(), { sourceFileName: activeDraftSourceFileName });",
     "sourceFileName: item.fileName",
+    "smartPunctuation: options.smartPunctuation === true",
+    "smartPunctuation: els.smartPunctuationOption?.checked === true",
     "function titleLedgerDetail",
     "parsed?.titleFromCandidate",
     "File name will be used as article title",
@@ -3136,6 +3238,14 @@ assert.ok(
 );
 assert.ok(
   sidepanelHtml.includes('id="confettiOption"') &&
+    sidepanelHtml.includes("Article import") &&
+    sidepanelHtml.includes("Choose metadata and safe text cleanup before writing to X.") &&
+    sidepanelHtml.includes('id="draftProcessingOptions"') &&
+    sidepanelHtml.includes('id="smartPunctuationOption"') &&
+    sidepanelHtml.includes("Smart punctuation") &&
+    sidepanelHtml.includes("Text cleanup") &&
+    sidepanelHtml.includes("Fix visible Chinese punctuation while leaving code, links, and URLs unchanged.") &&
+    sidepanelElementsText.includes('"smartPunctuationOption"') &&
     sidepanelHtml.includes('id="successSoundOption"') &&
     sidepanelHtml.includes('id="successSoundStyle"') &&
     sidepanelHtml.includes("Show a brief celebration on the X page when X reports a completed write.") &&
@@ -3159,6 +3269,7 @@ assert.ok(
     sidepanelText.includes('setDatasetValueIfChanged(document.body, "languagePreference", i18n?.preference?.() || currentLanguage)') &&
     sidepanelText.includes('setBooleanPropertyIfChanged(els.importTitleOption, "checked", importOptions.setTitle !== false)') &&
     sidepanelText.includes('setBooleanPropertyIfChanged(els.importCoverOption, "checked", importOptions.setCover !== false)') &&
+    sidepanelText.includes('setBooleanPropertyIfChanged(els.smartPunctuationOption, "checked", importOptions.smartPunctuation === true)') &&
     sidepanelText.includes('setBooleanPropertyIfChanged(els.articleExportOption, "checked", articleExportOptions.enabled !== false)') &&
     sidepanelText.includes('setBooleanPropertyIfChanged(els.confettiOption, "checked", successFeedbackOptions.confetti !== false)') &&
     sidepanelText.includes('setBooleanPropertyIfChanged(els.successSoundOption, "checked", successFeedbackOptions.sound !== false)') &&
@@ -3168,6 +3279,7 @@ assert.ok(
     !sidepanelText.includes("els.themeChoice.querySelectorAll('input[name=\"themeMode\"]').forEach") &&
     !sidepanelText.includes("els.importTitleOption.checked = importOptions.setTitle !== false") &&
     !sidepanelText.includes("els.importCoverOption.checked = importOptions.setCover !== false") &&
+    !sidepanelText.includes("els.smartPunctuationOption.checked = importOptions.smartPunctuation === true") &&
     !sidepanelText.includes("els.articleExportOption.checked = articleExportOptions.enabled !== false") &&
     !sidepanelText.includes("els.confettiOption.checked = successFeedbackOptions.confetti !== false") &&
     !sidepanelText.includes("els.successSoundOption.checked = successFeedbackOptions.sound !== false") &&
