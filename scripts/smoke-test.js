@@ -23,10 +23,14 @@ assert.equal(manifest.manifest_version, 3, "manifest must be MV3");
 assert.equal(manifest.default_locale, "en", "manifest must declare a default locale");
 assert.equal(manifestMessage(manifest.name), "xPoster", "manifest name must resolve to xPoster");
 assert.equal(pkg.version.replace(/\.0$/, ""), manifest.version, "package and manifest versions must match");
-for (const locale of ["zh_TW", "ja", "fr", "ru", "de", "es", "pt_BR", "ko"]) {
+assert.ok(
+  fs.existsSync(path.join(root, "_locales", "en", "messages.json")),
+  "en Chrome locale messages should be present"
+);
+for (const locale of ["zh_CN", "zh_TW", "ja", "fr", "ru", "de", "es", "pt_BR", "ko"]) {
   assert.ok(
-    fs.existsSync(path.join(root, "_locales", locale, "messages.json")),
-    `${locale} Chrome locale messages should be present`
+    !fs.existsSync(path.join(root, "_locales", locale)),
+    `${locale} Chrome locale should be removed (Simplified Chinese only)`
   );
 }
 assert.ok(!manifest.host_permissions, "remote image hosts must not be granted at install time");
@@ -227,12 +231,6 @@ const originalImporterHelperStart = contentScriptText.indexOf("  function detect
 const originalImporterHelperEnd = contentScriptText.indexOf("  function normalizeText");
 const articleRouteHelperStart = contentScriptText.indexOf("  function isArticleRoute");
 const articleRouteHelperEnd = contentScriptText.indexOf("  async function collectTargetContext");
-const articleExportRouteHelperStart = contentScriptText.indexOf("  function isArticleExportRoute");
-const articleExportRouteHelperEnd = contentScriptText.indexOf("  function scheduleArticleExportSync");
-const articleExportContainerHelperStart = contentScriptText.indexOf("  function articleExportContainer");
-const articleExportContainerHelperEnd = contentScriptText.indexOf("  function articleDockInlineEnd");
-const articleExportTitleHelperStart = contentScriptText.indexOf("  function detectArticleExportTitleNode");
-const articleExportTitleHelperEnd = contentScriptText.indexOf("  function detectArticleExportTitle", articleExportTitleHelperStart + 1);
 const editorTopActionHelperStart = contentScriptText.indexOf("  function findEditorTopActionButton");
 const editorTopActionHelperEnd = contentScriptText.indexOf("  function findImportButtonAdjacentAnchor");
 const statusSandbox = {
@@ -273,15 +271,8 @@ assert.ok(
   "original importer cleanup helpers should be present"
 );
 assert.ok(
-  articleRouteHelperStart >= 0 &&
-    articleRouteHelperEnd > articleRouteHelperStart &&
-    articleExportRouteHelperStart >= 0 &&
-    articleExportRouteHelperEnd > articleExportRouteHelperStart &&
-    articleExportContainerHelperStart >= 0 &&
-    articleExportContainerHelperEnd > articleExportContainerHelperStart &&
-    articleExportTitleHelperStart >= 0 &&
-    articleExportTitleHelperEnd > articleExportTitleHelperStart,
-  "article export route helpers should be present"
+  articleRouteHelperStart >= 0 && articleRouteHelperEnd > articleRouteHelperStart,
+  "article route helpers should be present"
 );
 assert.ok(
   editorTopActionHelperStart >= 0 && editorTopActionHelperEnd > editorTopActionHelperStart,
@@ -292,20 +283,13 @@ vm.runInNewContext(
    const CONTENT_ZH_TEXT = new Map(Object.entries({
      "Writing article": "正在写入文章",
      "Preparing Markdown...": "正在准备 Markdown...",
-     "Copy Markdown": "复制 Markdown",
-     "Download Markdown": "下载 Markdown",
-     "Copy MD": "复制 MD",
-     "Download MD": "下载 MD",
-     "Export Markdown": "导出 Markdown",
-     "Article title Markdown tools": "文章标题区 Markdown 工具",
-     "MD": "MD",
      "Queue Markdown drafts": "加入 Markdown 草稿队列",
      "Release to add them to the xPoster side panel.": "松开后加入 xPoster 侧边栏。"
    }));
    const CONTENT_EN_TEXT = new Map(Array.from(CONTENT_ZH_TEXT.entries()).map(([en, zh]) => [zh, en]));
    ${contentScriptText.slice(statusHelperStart, statusHelperEnd)}
    this.state = state;
-   this.statusHelpers = { statusThemeFromPage, statusProgressForText, translateContentText, articleExportLabel, articleExportShortLabel };`,
+   this.statusHelpers = { statusThemeFromPage, statusProgressForText, translateContentText };`,
   statusSandbox
 );
 vm.runInNewContext(
@@ -430,125 +414,6 @@ vm.runInNewContext(
      primaryOnlyId: primaryOnly?.id || null
    };`,
   editorTopActionSandbox
-);
-const articleRouteSandbox = { URL };
-vm.runInNewContext(
-  `const ARTICLE_EXPORT_LONGFORM_SELECTOR = "[data-testid='twitterArticleReadView']";
-   let longformPresent = false;
-   let location = { href: "https://x.com/home", origin: "https://x.com", pathname: "/home" };
-   const document = { querySelector: () => longformPresent ? {} : null };
-   function setLocation(href) {
-     const parsed = new URL(href);
-     location = { href, origin: parsed.origin, pathname: parsed.pathname };
-   }
-   ${contentScriptText.slice(articleRouteHelperStart, articleRouteHelperEnd)}
-   ${contentScriptText.slice(articleExportRouteHelperStart, articleExportRouteHelperEnd)}
-   setLocation("https://x.com/i/article/2061085830580785152");
-   const iArticle = { id: articleExportIdFromUrl(), route: isArticleExportRoute() };
-   setLocation("https://x.com/alice/status/111/article/222?ref=profile");
-   const nestedArticle = { id: articleExportIdFromUrl(), route: isArticleExportRoute() };
-   setLocation("https://twitter.com/alice/articles/333");
-   const pluralArticle = { id: articleExportIdFromUrl(), route: isArticleExportRoute() };
-   setLocation("https://x.com/alice/status/444");
-   const statusArticle = { id: articleExportIdFromUrl(), route: isArticleExportRoute() };
-   setLocation("https://x.com/compose/articles/edit/555");
-   const composeEdit = { id: articleExportIdFromUrl(), route: isArticleExportRoute() };
-   setLocation("https://x.com/compose/articles");
-   const composeList = { id: articleExportIdFromUrl(), route: isArticleExportRoute() };
-   setLocation("https://example.com/i/article/666");
-   const nonX = articleExportPathInfo();
-   setLocation("https://x.com/new-article-route/777");
-   longformPresent = true;
-   const longformFallback = isArticleExportRoute();
-   this.articleExportRouteResults = {
-     iArticle,
-     nestedArticle,
-     pluralArticle,
-     statusArticle,
-     composeEdit,
-     composeList,
-     nonX,
-     longformFallback
-   };`,
-  articleRouteSandbox
-);
-const articleExportDomSandbox = { Node: { TEXT_NODE: 3, ELEMENT_NODE: 1 } };
-vm.runInNewContext(
-  `const ARTICLE_EXPORT_ID = "__xposter_article_export__";
-   const ARTICLE_EXPORT_LONGFORM_SELECTOR = "[data-testid='twitterArticleReadView'],[data-testid='twitter-article-title'],[data-testid='twitterArticleRichTextView'],[data-testid='longformRichTextComponent']";
-   const document = { body: { name: "body", children: [], parentElement: null } };
-   function normalizeText(value) {
-     return String(value || "").replace(/\\s+/g, " ").trim();
-   }
-   function nodeMatches(node, selector) {
-     return selector.split(",").map((part) => part.trim()).some((part) => {
-       if (!part) return false;
-       if (part === "article" || part === "main article" || part === "section" || part === "div") return node.tagName === part.split(" ").pop().toUpperCase();
-       if (part === "[data-testid='cellInnerDiv']") return node.testid === "cellInnerDiv";
-       if (part === "[data-testid='twitterArticleReadView']") return node.testid === "twitterArticleReadView";
-       if (part === "[data-testid='twitter-article-title']") return node.testid === "twitter-article-title";
-       if (part === "[data-testid='twitterArticleRichTextView']") return node.testid === "twitterArticleRichTextView";
-       if (part === "[data-testid='longformRichTextComponent']") return node.testid === "longformRichTextComponent";
-       if (part === "h1" || part === "h2") return node.tagName === part.toUpperCase();
-       if (part === "[role='heading']") return node.role === "heading";
-       return false;
-     });
-   }
-   function makeNode({ tag = "div", text = "", testid = "", role = "", rect = { width: 560, height: 180 }, parent = null } = {}) {
-     const node = {
-       tagName: tag.toUpperCase(),
-       textContent: text,
-       innerText: text,
-       testid,
-       role,
-       parentElement: parent,
-       children: [],
-       id: "",
-       matches(selector) { return nodeMatches(node, selector); },
-       closest(selector) {
-         for (let current = node; current; current = current.parentElement) {
-           if (nodeMatches(current, selector)) return current;
-         }
-         return null;
-       },
-       querySelector(selector) {
-         return node.querySelectorAll(selector)[0] || null;
-       },
-       querySelectorAll(selector) {
-         const found = [];
-         const walk = (current) => {
-           for (const child of current.children) {
-             if (nodeMatches(child, selector)) found.push(child);
-             walk(child);
-           }
-         };
-         walk(node);
-         return found;
-       },
-       getBoundingClientRect() { return rect; }
-     };
-     if (parent) parent.children.push(node);
-     return node;
-   }
-   function articleNodeReadableText(node) {
-     return node?.innerText || node?.textContent || "";
-   }
-   ${contentScriptText.slice(articleExportContainerHelperStart, articleExportContainerHelperEnd)}
-   ${contentScriptText.slice(articleExportTitleHelperStart, articleExportTitleHelperEnd)}
-   const pageRoot = makeNode({ tag: "div", text: "Page chrome and hidden shortcuts", parent: document.body, rect: { width: 1200, height: 800 } });
-   const isolatedArticleLink = makeNode({ tag: "a", text: "", parent: pageRoot, rect: { width: 36, height: 36 } });
-   const hiddenHeading = makeNode({ tag: "h2", text: "To view keyboard shortcuts, press question mark", parent: pageRoot, role: "heading", rect: { width: 1, height: 1 } });
-   const tweet = makeNode({ tag: "article", text: "Real article text with all longform children and metadata", parent: pageRoot, testid: "tweet", rect: { width: 598, height: 1200 } });
-   const readView = makeNode({ tag: "div", text: "Readable longform body", parent: tweet, testid: "twitterArticleReadView", rect: { width: 566, height: 1000 } });
-   const title = makeNode({ tag: "div", text: "Real X Article Title", parent: readView, testid: "twitter-article-title", rect: { width: 566, height: 132 } });
-   const bodyHeading = makeNode({ tag: "h2", text: "Body Section", parent: readView, rect: { width: 566, height: 36 } });
-   this.articleExportDomResults = {
-     isolatedContainer: articleExportContainer(isolatedArticleLink),
-     longformContainerIsNotPageRoot: articleExportContainer(readView) !== pageRoot,
-     titleText: detectArticleExportTitleNode(tweet)?.innerText || "",
-     hiddenRejected: isReadableArticleTitleNode(hiddenHeading)
-   };`,
-  articleExportDomSandbox
 );
 vm.runInNewContext(
   `const X_ARTICLE_MEDIA_SOFT_LIMIT = 25;
@@ -1225,118 +1090,24 @@ assert.ok(
 );
 assert.ok(
   includesAll(contentScriptText, [
-    'const ARTICLE_EXPORT_ID = "__xposter_article_export__"',
-    'const ARTICLE_EXPORT_SETTINGS_STORAGE_KEY = "xposter_article_export_settings"',
-    'enabled: settings.enabled !== false',
-    'function installArticleExportButton',
-    'function scheduleArticleExportSyncFromMutations',
-    'function shouldScheduleArticleExportSync',
-    'function mutationTouchesArticleExportSignal',
-    'function nodeHasArticleExportSignal',
-    'new MutationObserver(scheduleArticleExportSyncFromMutations)',
-    'function extractReadableXArticle',
-    'function articleExportPathInfo',
-    'function articleExportAnchorSelector',
-    'function articleExportPathMatches',
-    'articleExportPathInfo().readable',
-    'segment) => /^(?:article|articles)$/.test(segment)',
-    'const ARTICLE_EXPORT_LONGFORM_SELECTOR',
-    'function hasReadableArticleSignal',
-    'function containerHasReadableArticleSignal',
-    'function articleExportMediaLinks',
-    'if (!hasReadableArticleSignal()) return null;',
-    'longformRoots',
-    'articleRoots',
-    'if (!containerHasReadableArticleSignal(container)) return null;',
-    'const article = element?.closest?.("article") || null;',
-    'const longform = element?.closest?.(ARTICLE_EXPORT_LONGFORM_SELECTOR) || null;',
-    'if (!article && !longform) return null;',
-    'if (node === boundary || node.matches?.("article")) break;',
-    'function isReadableArticleTitleNode',
-    'const xTitle = container?.querySelector?.("[data-testid=\'twitter-article-title\']");',
-    'return !rect || (rect.width >= 32 && rect.height >= 12);',
-    'function markdownForArticleNode',
-    'function detectArticleExportTitleNode',
-    'function removeDuplicateArticleTitleParts',
-    'function markdownCharacterCount',
-    'function markdownImageCount',
-    'navigator.clipboard.writeText(text)',
-    'link.download = fileName || articleFileName("")',
-    'root.setAttribute("role", "group")',
-    'root = document.createElement("span")',
-    'root.setAttribute("aria-label", translateContentText("Article title Markdown tools"))',
-    '__xposter_article_export_mark',
-    '${translateContentText("MD")}',
-    'data-export-action="copy"',
-    'data-export-action="download"',
-    'data-export-icon="copy"',
-    'data-export-icon="download"',
-    '__xposter_article_export_feedback',
-    'root.addEventListener("click", handleArticleExportActionClick)',
-    'await handleArticleExportAction(button.dataset.exportAction)',
-    'await setArticleExportMode(mode)',
-    'downloadMarkdown(article.markdown, article.fileName)',
-    'notifyArticleExportSuccess(root, "download", article)',
-    'notifyArticleExportSuccess(root, "copy", article)',
-    'setDatasetValueIfChanged(root, "articleFileName", article.fileName || articleFileName(article.title))',
-    'setDatasetValueIfChanged(root, "articleCharacterCount", article.characterCount || 0)',
-    'setDatasetValueIfChanged(root, "articleImageCount", article.imageCount || 0)',
-    'placeArticleExportRoot(root, article)',
-    'if (root.parentElement !== anchor) anchor.appendChild(root)',
-    'setDatasetValueIfChanged(root, "placement", "inline")',
-    'setDatasetValueIfChanged(root, "placement", "fixed")',
-    'function articleNodeReadableText',
-    'const heading = normalizeText(articleNodeReadableText(titleNode))',
-    'clone?.querySelector?.(`#${ARTICLE_EXPORT_ID}`)?.remove()',
-    '个字符，${images} 张图片',
-    '${characters} characters, ${images} images',
-    'position: fixed',
-    'right: var(--__xposter-article-export-inline-end, 24px)',
-    'function articleDockInlineEnd',
-    'width: fit-content',
-    'function articleExportNodes(root)',
-    'const { mark, buttons } = articleExportNodes(root)',
-    'const { feedback } = articleExportNodes(root)',
-    'setSourceHtmlIfChanged(button, articleExportIconMarkup(buttonMode))',
-    'removeDatasetValueIfChanged(button, "active")',
-    'function articleExportIconMarkup',
-    '.__xposter_article_export_actions',
-    'opacity: 0',
-    'data-placement="fixed"] .__xposter_article_export_actions',
-    '--__xposter-export-paper: #ffffff',
-    'border-radius: 999px',
-    'background: var(--__xposter-export-paper)',
     'const LANGUAGE_STORAGE_KEY = "xposter_language"',
     'function restoreContentLanguage',
     'function translateContentText',
-    'prefers-reduced-motion: reduce',
-    'installArticleExportButton();'
+    'prefers-reduced-motion: reduce'
   ]) &&
     excludesAll(contentScriptText, [
-      '__xposter_article_export_menu',
-      '__xposter_article_export_main',
-      '__xposter_article_export_toggle',
-      'data-export-mode',
-      'documentListenersInstalled',
-      'toggleArticleExportMenu',
-      'closeArticleExportMenuOnOutside',
-      'backdrop-filter: blur',
-      'button[data-active="true"]',
-      'button.textContent = articleExportShortLabel',
-      'new MutationObserver(() => scheduleArticleExportSync())',
-      '[data-xposter-article-export-host="true"]',
-      'root.dataset.articleFileName = article.fileName || articleFileName(article.title)',
-      'root.dataset.articleCharacterCount = String(article.characterCount || 0)',
-      'root.dataset.articleImageCount = String(article.imageCount || 0)',
-      'root.dataset.placement = "inline"',
-      'root.dataset.placement = "fixed"',
-      'button.innerHTML = articleExportIconMarkup(buttonMode)',
-      'button.removeAttribute("data-active")',
-      '__xposterArticleExportNodes',
-      'root.querySelectorAll("[data-export-action]").forEach',
-      'const feedback = root.querySelector(".__xposter_article_export_feedback");'
+      'ARTICLE_EXPORT',
+      'articleExport',
+      'ArticleExport',
+      'installArticleExportButton',
+      'extractReadableXArticle',
+      '__xposter_article_export_mark',
+      '__xposter_article_export_feedback',
+      '__xposter_article_export_actions',
+      'data-export-action',
+      'function injectArticleExportStyles'
     ]),
-  "readable X article pages should expose localized title-integrated Markdown copy/download tools with remembered action, title de-duplication, and file/count feedback"
+  "the published article Markdown export subsystem should be fully removed from the content script while content language helpers remain"
 );
 assert.ok(
   !contentScriptText.includes("function positionDropHint") &&
@@ -1412,47 +1183,9 @@ assert.equal(
   "X page completion should keep pending X media IDs visible alongside skipped image warnings"
 );
 assert.equal(statusSandbox.statusHelpers.translateContentText("Writing article"), "正在写入文章", "X page status titles should be localized");
-assert.equal(statusSandbox.statusHelpers.translateContentText("Article title Markdown tools"), "文章标题区 Markdown 工具", "X article export group should describe its title placement");
-assert.equal(statusSandbox.statusHelpers.articleExportLabel("copy"), "复制 Markdown", "X article export controls should localize action labels");
-assert.equal(statusSandbox.statusHelpers.articleExportShortLabel("download"), "下载 MD", "X article export title labels should use compact localized text");
-assert.deepEqual(
-  JSON.parse(JSON.stringify(articleRouteSandbox.articleExportRouteResults)),
-  {
-    iArticle: { id: "2061085830580785152", route: true },
-    nestedArticle: { id: "222", route: true },
-    pluralArticle: { id: "333", route: true },
-    statusArticle: { id: "444", route: true },
-    composeEdit: { id: null, route: false },
-    composeList: { id: null, route: false },
-    nonX: { id: null, readable: false },
-    longformFallback: true
-  },
-  "article export tools should mount on modern readable X Article URLs while staying out of compose routes"
-);
-assert.deepEqual(
-  {
-    isolatedContainer: articleExportDomSandbox.articleExportDomResults.isolatedContainer,
-    longformContainerIsNotPageRoot: articleExportDomSandbox.articleExportDomResults.longformContainerIsNotPageRoot,
-    titleText: articleExportDomSandbox.articleExportDomResults.titleText,
-    hiddenRejected: articleExportDomSandbox.articleExportDomResults.hiddenRejected
-  },
-  {
-    isolatedContainer: null,
-    longformContainerIsNotPageRoot: true,
-    titleText: "Real X Article Title",
-    hiddenRejected: false
-  },
-  "article export should ignore page chrome links, prefer the real X article title, and reject hidden shortcut headings"
-);
-statusSandbox.state.language = "zh-TW";
-assert.equal(statusSandbox.statusHelpers.translateContentText("Preparing Markdown..."), "正在準備 Markdown...", "X page status details should support Traditional Chinese");
-assert.equal(statusSandbox.statusHelpers.translateContentText("Queue Markdown drafts"), "加入 Markdown 草稿佇列", "X page drop hints should support Traditional Chinese");
-statusSandbox.state.language = "ja";
-assert.equal(
-  statusSandbox.statusHelpers.translateContentText("Preparing Markdown..."),
-  "Preparing Markdown...",
-  "partially supported languages should fall back to English instead of mixing Chinese"
-);
+statusSandbox.state.language = "zh";
+assert.equal(statusSandbox.statusHelpers.translateContentText("Preparing Markdown..."), "正在准备 Markdown...", "X page status details should render Simplified Chinese");
+assert.equal(statusSandbox.statusHelpers.translateContentText("Queue Markdown drafts"), "加入 Markdown 草稿队列", "X page drop hints should render Simplified Chinese");
 assert.ok(
   mainWorldText.includes("uploadFilesToEditor"),
   "main-world bridge should hand dropped image files to X's own uploader"
@@ -1550,8 +1283,7 @@ assert.ok(
     contentScriptText.includes("showStatus(message, skipped ? \"warn\" : \"done\", skipped ? 8000 : 5000);") &&
     mainWorldText.includes("dataSignature: mediaEntityDataSignature(data)") &&
     mainWorldText.includes("if (info.mediaId) upload.mediaId = info.mediaId;") &&
-    mainWorldText.includes("if (payload.cover && imageSourcesMatch(upload.source, payload.cover) && !upload.mediaId") &&
-    mainWorldText.includes("const refreshed = await waitForUploadMediaId(draftNode, upload);") &&
+    mainWorldText.includes("const refreshed = await waitForUploadMediaId(draftNode, coverUpload);") &&
     mainWorldText.includes("if (candidate.mediaId) complete = candidate;") &&
     mainWorldText.includes("else pending ||= candidate;") &&
     mainWorldText.includes("const retryState = { requested: false, retryable: false, context };") &&
@@ -1741,7 +1473,6 @@ assert.ok(
     !sidepanelText.includes("firstQueueMediaLimitBlocker(mediaUploadEstimateForMarkdowns(markdowns, importOptions))") &&
     contentScriptText.includes("function articleMediaUploadEstimate") &&
     contentScriptText.includes("let bodyImages = 0;") &&
-    contentScriptText.includes("let tables = 0;") &&
     contentScriptText.includes("let coverInBody = false;") &&
     contentScriptText.includes("for (const segment of segments) {") &&
     contentScriptText.includes("shared.imageSourcesMatch(segment.source, coverSource)") &&
@@ -1867,7 +1598,6 @@ assert.ok(
     !sidepanelText.includes("if (remoteCount) return remoteImageWriteHint(remoteCount);\n    const mediaEstimate = mediaUploadEstimate(latestParsed);") &&
     sidepanelText.includes("function mediaUploadEstimate") &&
     sidepanelText.includes("let bodyImages = 0;") &&
-    sidepanelText.includes("let tables = 0;") &&
     sidepanelText.includes("let coverInBody = false;") &&
     sidepanelText.includes("function localImageReferences") &&
     sidepanelText.includes("const coverIsLocal = Boolean(coverSource && shared.isLocalImageSource(coverSource));") &&
@@ -1885,8 +1615,6 @@ assert.ok(
     sidepanelText.includes('if (segment.type === "image") {') &&
     sidepanelText.includes("bodyImages += 1;") &&
     sidepanelText.includes("shared.imageSourcesMatch(segment.source, coverSource)") &&
-    sidepanelText.includes('} else if (segment.type === "table") {') &&
-    sidepanelText.includes("tables += 1;") &&
     sidepanelText.includes("mediaLimitWarningText") &&
     sidepanelText.includes("mediaHeadroomText") &&
     sidepanelText.includes("mediaCapacityText") &&
@@ -2081,17 +1809,14 @@ assert.ok(
   "side panel writes should include saved title/cover options and batch queue writes should force each draft into a new X Article"
 );
 assert.ok(
-  sidepanelHtml.includes('id="articleExportOptions"') &&
-    sidepanelHtml.includes('id="articleExportOption" checked') &&
-    sidepanelHtml.includes("Published article Markdown tools") &&
-    sidepanelHtml.includes("Copy or download a readable X Article as Markdown from its title area.") &&
-    sidepanelRuntimeText.includes('const STORAGE_ARTICLE_EXPORT_SETTINGS = "xposter_article_export_settings"') &&
-    sidepanelText.includes("let articleExportOptions = { enabled: true, mode: \"copy\" }") &&
-    sidepanelText.includes("function restoreArticleExportOptions") &&
-    sidepanelText.includes("function restoreStartupState") &&
-    sidepanelText.includes("setArticleExportOptions({") &&
-    sidepanelText.includes("applyArticleExportOptions(stored[STORAGE_ARTICLE_EXPORT_SETTINGS] || articleExportOptions)"),
-  "settings should expose default-on title-integrated article Markdown tools"
+  sidepanelText.includes("function restoreStartupState") &&
+    !sidepanelHtml.includes('id="articleExportOption"') &&
+    !sidepanelHtml.includes("Published article Markdown tools") &&
+    !sidepanelHtml.includes("Article export") &&
+    !sidepanelRuntimeText.includes("STORAGE_ARTICLE_EXPORT_SETTINGS") &&
+    !sidepanelText.includes("articleExportOptions") &&
+    !sidepanelText.includes("ArticleExportOptions"),
+  "the published article Markdown export settings should be fully removed from the side panel"
 );
 assert.ok(
   !sidepanelText.includes('record-icon-action is-disabled'),
@@ -2233,62 +1958,52 @@ assert.ok(
     !sidepanelHtml.includes("<h2>Saved result checklist</h2>"),
   "saved results should read as a user-facing publish record, with technical details hidden by default"
 );
+const i18nText = readText("src/i18n.js");
 assert.ok(
-    sidepanelHtml.includes('<option value="auto">Automatic</option>') &&
-    sidepanelHtml.includes('<option value="zh-TW">繁體中文</option>') &&
-    sidepanelHtml.includes('<option value="ja">日本語</option>') &&
-    sidepanelHtml.includes('<option value="fr">Français</option>') &&
-    sidepanelHtml.includes('<option value="ru">Русский</option>') &&
-    sidepanelHtml.includes('id="languageSelectButton"') &&
-    sidepanelHtml.includes('id="languageOptionsList"') &&
-    sidepanelText.includes("let languageOptionButtons = [];") &&
-    sidepanelText.includes("function populateLanguageSelect") &&
-    sidepanelText.includes("function languageOptionLabel") &&
-    sidepanelText.includes("function collectLanguageOptionButtons()") &&
-    sidepanelText.includes("function handleLanguageOptionsKeydown") &&
-    sidepanelText.includes('setBooleanPropertyIfChanged(els.languageOptionsList, "hidden", true)') &&
-    sidepanelText.includes('setBooleanPropertyIfChanged(els.languageOptionsList, "hidden", false)') &&
-    sidepanelText.includes('setAttributeValueIfChanged(els.languageSelectButton, "aria-expanded", "false")') &&
-    sidepanelText.includes('setAttributeValueIfChanged(els.languageSelectButton, "aria-expanded", "true")') &&
-    sidepanelText.includes("setTextContentIfChanged(els.languageSelectValue, selectedLabel)") &&
-    sidepanelText.includes("languageOptionButtons.forEach((button) =>") &&
-    sidepanelText.includes('const selected = languageOptionButtons.find((button) => button.getAttribute("aria-selected") === "true");') &&
-    sidepanelText.includes("const options = languageOptionButtons;") &&
-    sidepanelText.includes('setAttributeValueIfChanged(button, "aria-selected", selected ? "true" : "false")') &&
-    sidepanelText.includes('setNumericPropertyIfChanged(button, "tabIndex", selected ? 0 : -1)') &&
-    sidepanelText.includes('setNumericPropertyIfChanged(option, "tabIndex", index === nextIndex ? 0 : -1)') &&
-    sidepanelText.includes("setSourceHtmlIfChanged(els.languageSelect, selectHtml)") &&
-    sidepanelText.includes("setSourceHtmlIfChanged(els.languageOptionsList, optionsHtml)") &&
-    sidepanelText.includes("languageOptionButtons = collectLanguageOptionButtons();") &&
-    !sidepanelText.includes("els.languageOptionsList.hidden = true") &&
-    !sidepanelText.includes("els.languageOptionsList.hidden = false") &&
-    !sidepanelText.includes('els.languageSelectButton.setAttribute("aria-expanded", "false")') &&
-    !sidepanelText.includes('els.languageSelectButton.setAttribute("aria-expanded", "true")') &&
-    !sidepanelText.includes("els.languageSelectValue.textContent = selectedLabel") &&
-    !sidepanelText.includes('els.languageOptionsList.querySelectorAll("[data-language-option]").forEach') &&
-    !sidepanelText.includes('const selected = els.languageOptionsList.querySelector(\'[aria-selected="true"]\')') &&
-    !sidepanelText.includes('const options = Array.from(els.languageOptionsList.querySelectorAll("[data-language-option]"))') &&
-    !sidepanelText.includes('button.setAttribute("aria-selected", selected ? "true" : "false")') &&
-    !sidepanelText.includes("button.tabIndex = selected ? 0 : -1") &&
-    !sidepanelText.includes("option.tabIndex = index === nextIndex ? 0 : -1") &&
-    !sidepanelText.includes("els.languageSelect.innerHTML = options") &&
-    !sidepanelText.includes("els.languageOptionsList.innerHTML = options") &&
-    sidepanelText.includes("i18n.languageOptions()") &&
-    sidepanelCss.includes(".language-option") &&
-    sidepanelCss.includes("text-align: center;") &&
+    !sidepanelHtml.includes('<option value="auto">Automatic</option>') &&
+    !sidepanelHtml.includes('<option value="zh-TW">') &&
+    !sidepanelHtml.includes('<option value="ja">') &&
+    !sidepanelHtml.includes('id="languageSelectButton"') &&
+    !sidepanelHtml.includes('id="languageOptionsList"') &&
+    !sidepanelHtml.includes('id="languageSelect"') &&
+    !sidepanelHtml.includes("setting-row-language") &&
+    !sidepanelText.includes("languageOptionButtons") &&
+    !sidepanelText.includes("function populateLanguageSelect") &&
+    !sidepanelText.includes("function languageOptionLabel") &&
+    !sidepanelText.includes("function collectLanguageOptionButtons") &&
+    !sidepanelText.includes("function handleLanguageOptionsKeydown") &&
+    !sidepanelText.includes("function handleLanguageButtonKeydown") &&
+    !sidepanelText.includes("function toggleLanguageMenu") &&
+    !sidepanelText.includes("function openLanguageMenu") &&
+    !sidepanelText.includes("function closeLanguageMenu") &&
+    !sidepanelText.includes("function focusLanguageOption") &&
+    !sidepanelText.includes("function syncLanguageButton") &&
+    !sidepanelText.includes("els.languageSelect") &&
+    !sidepanelText.includes("els.languageOptionsList") &&
+    !sidepanelText.includes("els.languageSelectButton") &&
+    !sidepanelText.includes("els.languageSelectValue") &&
+    !sidepanelText.includes("els.languageControl") &&
+    !sidepanelElementsText.includes('"languageSelect"') &&
+    !sidepanelElementsText.includes('"languageOptionsList"') &&
+    !sidepanelElementsText.includes('"languageControl"') &&
+    !sidepanelText.includes('"zh-TW"') &&
+    !sidepanelCss.includes(".language-option") &&
+    !sidepanelCss.includes(".language-control") &&
+    !sidepanelCss.includes(".setting-row-language") &&
+    i18nText.includes('{ code: "zh", nativeName: "中文", htmlLang: "zh-CN" }') &&
+    !i18nText.includes('code: "zh-TW"') &&
+    !i18nText.includes('code: "ja"') &&
+    !sidepanelMessagesText.includes('"zh-TW": Object.fromEntries') &&
+    sidepanelText.includes("function isChineseLanguage") &&
     sidepanelText.includes("window.xPosterSidepanelMessages?.register?.(i18n, shared") &&
     sidepanelMessagesText.includes("window.xPosterSidepanelMessages = { register }") &&
     sidepanelText.includes("const sidepanelPatterns = window.xPosterSidepanelPatterns") &&
     sidepanelPatternsText.includes("window.xPosterSidepanelPatterns") &&
-    sidepanelMessagesText.includes('"zh-TW": Object.fromEntries') &&
-    sidepanelText.includes("function isChineseLanguage") &&
-    sidepanelText.includes("shared.toTraditionalChinese") &&
-    sharedText.includes("function toTraditionalChinese") &&
     diagnosticsHtmlIncludesSharedFirst() &&
     sidepanelText.includes('setLocalizedTextIfChanged(els.runPreflight, "Checking...")') &&
     sidepanelText.includes('setLocalizedTextIfChanged(els.evidenceMeta, "No technical record saved yet.")') &&
     sidepanelText.includes("localizeInterpolated(\"Local image folder setup failed: {error}\""),
-  "side panel language selection should support auto and global languages while keeping dynamic status text localized"
+  "side panel should be Simplified-Chinese only with the language selector removed while keeping dynamic status text localized"
 );
 assert.ok(
   sidepanelText.includes("function buildPublishRecordSummary") &&
@@ -2392,7 +2107,7 @@ assert.ok(
     !mainWorldText.includes("function orderImageOperationsForMetadata") &&
     !mainWorldText.includes("coverPriorityForImageOperation");
   const coverAfterUpload =
-    mainWorldText.indexOf("await applyCoverMetadata(payload.cover, articleId, upload, summary);") >
+    mainWorldText.indexOf("await applyCoverMetadata(payload.cover, articleId, coverUpload, summary);") >
     mainWorldText.indexOf("const result = await uploadImageAtMarker");
   const timelineMetadataFirst =
     sidepanelHtml.indexOf('data-timeline-step="metadata"') < sidepanelHtml.indexOf('data-timeline-step="media"') &&
@@ -2540,7 +2255,7 @@ assert.ok(
       'setClassPresenceIfChanged(els.draftPanel, "drag-active", false)',
       "workspaceTabs.forEach((tab) =>",
       "function formatCompactNumber",
-      'const tenThousandUnit = currentLanguage === "zh-TW" ? "萬" : "万";',
+      'const tenThousandUnit = "万";',
       'setDatasetValueIfChanged(els.draftPanel, "queueMode", hasQueue ? "true" : "false")',
       'setBooleanPropertyIfChanged(els.draftEditorShell, "hidden", hasQueue)',
       'setDatasetValueIfChanged(els.draftEditorShell, "density", isCompact ? "compact" : "roomy")',
@@ -3417,8 +3132,7 @@ assert.ok(
   "record edit dialog should reuse Markdown syntax highlighting, formatting, preview, and a single stable action bar"
 );
 assert.ok(
-  sidepanelHtml.includes('id="confettiOption"') &&
-    sidepanelHtml.includes("Article import") &&
+  sidepanelHtml.includes("Article import") &&
     sidepanelHtml.includes("Choose metadata and safe text cleanup before writing to X.") &&
     sidepanelHtml.includes('id="draftProcessingOptions"') &&
     sidepanelHtml.includes('id="smartPunctuationOption"') &&
@@ -3426,9 +3140,10 @@ assert.ok(
     sidepanelHtml.includes("Text cleanup") &&
     sidepanelHtml.includes("Fix visible Chinese punctuation while leaving code, links, and URLs unchanged.") &&
     sidepanelElementsText.includes('"smartPunctuationOption"') &&
-    sidepanelHtml.includes('id="successSoundOption"') &&
-    sidepanelHtml.includes('id="successSoundStyle"') &&
-    sidepanelHtml.includes("Show a brief celebration on the X page when X reports a completed write.") &&
+    !sidepanelHtml.includes('id="confettiOption"') &&
+    !sidepanelHtml.includes('id="successSoundOption"') &&
+    !sidepanelHtml.includes('id="successSoundStyle"') &&
+    !sidepanelHtml.includes("Show a brief celebration on the X page when X reports a completed write.") &&
     sidepanelText.includes("const themeModeInputs = els.themeChoice ? [...els.themeChoice.querySelectorAll('input[name=\"themeMode\"]')] : [];") &&
     sidepanelText.includes("themeModeInputs.forEach((input) => {") &&
     sidepanelText.includes('setBooleanPropertyIfChanged(input, "checked", input.value === currentThemeMode)') &&
@@ -3450,21 +3165,11 @@ assert.ok(
     sidepanelText.includes('setBooleanPropertyIfChanged(els.importTitleOption, "checked", importOptions.setTitle !== false)') &&
     sidepanelText.includes('setBooleanPropertyIfChanged(els.importCoverOption, "checked", importOptions.setCover !== false)') &&
     sidepanelText.includes('setBooleanPropertyIfChanged(els.smartPunctuationOption, "checked", importOptions.smartPunctuation === true)') &&
-    sidepanelText.includes('setBooleanPropertyIfChanged(els.articleExportOption, "checked", articleExportOptions.enabled !== false)') &&
-    sidepanelText.includes('setBooleanPropertyIfChanged(els.confettiOption, "checked", successFeedbackOptions.confetti !== false)') &&
-    sidepanelText.includes('setBooleanPropertyIfChanged(els.successSoundOption, "checked", successFeedbackOptions.sound !== false)') &&
-    sidepanelText.includes('setPropertyValueIfChanged(els.successSoundStyle, "value", successFeedbackOptions.soundStyle || "soft")') &&
-    sidepanelText.includes('setBooleanPropertyIfChanged(els.successSoundStyle, "disabled", !soundEnabled)') &&
     !sidepanelText.includes("input.checked = input.value === currentThemeMode") &&
     !sidepanelText.includes("els.themeChoice.querySelectorAll('input[name=\"themeMode\"]').forEach") &&
     !sidepanelText.includes("els.importTitleOption.checked = importOptions.setTitle !== false") &&
     !sidepanelText.includes("els.importCoverOption.checked = importOptions.setCover !== false") &&
     !sidepanelText.includes("els.smartPunctuationOption.checked = importOptions.smartPunctuation === true") &&
-    !sidepanelText.includes("els.articleExportOption.checked = articleExportOptions.enabled !== false") &&
-    !sidepanelText.includes("els.confettiOption.checked = successFeedbackOptions.confetti !== false") &&
-    !sidepanelText.includes("els.successSoundOption.checked = successFeedbackOptions.sound !== false") &&
-    !sidepanelText.includes("els.successSoundStyle.value = successFeedbackOptions.soundStyle || \"soft\"") &&
-    !sidepanelText.includes("els.successSoundStyle.disabled = !soundEnabled") &&
     !sidepanelText.includes("document.documentElement.dataset.theme = resolvedTheme") &&
     !sidepanelText.includes("document.documentElement.dataset.themeMode = currentThemeMode") &&
     !sidepanelText.includes("document.documentElement.style.colorScheme = resolvedTheme") &&
@@ -3480,13 +3185,12 @@ assert.ok(
   "settings and theme controls should expose the same options while avoiding repeated checkbox dataset and style writes"
 );
 assert.ok(
-  sidepanelText.includes("if (!batch || draftQueue.length === 0)") &&
-    sidepanelText.includes("triggerSuccessFeedback(response.summary)") &&
-    sidepanelText.includes("requestPageSuccessCelebration(summary)") &&
-    sidepanelText.includes('type: "xposter:success-celebration"') &&
-    sidepanelText.includes("colors: SUCCESS_CELEBRATION_COLORS") &&
-    sidepanelText.includes("lastSuccessFeedbackKey"),
-  "successful imports should request one celebration on the active X page, and batch writes should wait for the final queued item"
+  !sidepanelText.includes("triggerSuccessFeedback") &&
+    !sidepanelText.includes("requestPageSuccessCelebration") &&
+    !sidepanelText.includes('type: "xposter:success-celebration"') &&
+    !sidepanelText.includes("SUCCESS_CELEBRATION_COLORS") &&
+    !sidepanelText.includes("lastSuccessFeedbackKey"),
+  "success feedback (celebration animation) should be fully removed from the side panel"
 );
 assert.ok(
   sidepanelText.includes('return ["running", "parsed", "error"].includes(progress?.state);') &&
@@ -3514,41 +3218,27 @@ assert.ok(
     !sidepanelText.includes("successConfetti") &&
     !sidepanelCss.includes(".success-confetti-canvas") &&
     !sidepanelText.includes("testSuccessFeedback") &&
-    includesAll(contentScriptText, [
-      'const SUCCESS_CELEBRATION_ID = "__xposter_success_celebration__"',
-      'const SUCCESS_CELEBRATION_STYLE_ID = "__xposter_success_celebration_style__"',
-      "const SUCCESS_CELEBRATION_DURATION_MS = 3200",
-      "const SUCCESS_CELEBRATION_PIECE_COUNT = 72",
-      "function injectSuccessCelebrationStyle",
-      "function showSuccessCelebration",
-      "prefersReducedMotion()",
-      "position: fixed;",
-      "width: 100vw;",
-      "height: 100dvh;",
-      "animation: __xposter_success_piece 2600ms",
-      "window.setTimeout(() => root.remove(), SUCCESS_CELEBRATION_DURATION_MS)",
-      ".__xposter_success_mark",
-      ".__xposter_success_piece",
-      "prefers-reduced-motion: reduce",
-      'message?.type === "xposter:success-celebration"'
-    ]),
-  "celebration should render on the X page through the content script, not side panel canvas confetti"
+    !contentScriptText.includes("SUCCESS_CELEBRATION_ID") &&
+    !contentScriptText.includes("SUCCESS_CELEBRATION_STYLE_ID") &&
+    !contentScriptText.includes("SUCCESS_CELEBRATION_DURATION_MS") &&
+    !contentScriptText.includes("SUCCESS_CELEBRATION_PIECE_COUNT") &&
+    !contentScriptText.includes("injectSuccessCelebrationStyle") &&
+    !contentScriptText.includes("showSuccessCelebration") &&
+    !contentScriptText.includes("__xposter_success_mark") &&
+    !contentScriptText.includes("__xposter_success_piece") &&
+    !contentScriptText.includes('message?.type === "xposter:success-celebration"'),
+  "success celebration should be fully removed from the content script"
 );
 assert.ok(
-  sidepanelText.includes("AudioContext") &&
-    sidepanelText.includes("createOscillator") &&
-    sidepanelText.includes("SUCCESS_SOUND_STYLES") &&
-    sidepanelRuntimeText.includes("SUCCESS_SOUND_VOLUME: 1") &&
-    sidepanelText.includes("successSoundNotes") &&
-    sidepanelText.includes("async function primeSuccessAudio()") &&
-    sidepanelText.includes("async function previewSuccessFeedback()") &&
-    sidepanelText.includes("await primeSuccessAudio();") &&
-    sidepanelText.includes("previewSuccessFeedback()") &&
-    !sidepanelText.includes("if (successFeedbackOptions.confetti) await requestPageSuccessCelebration();") &&
-    !sidepanelText.includes("successSoundVolume") &&
-    !sidepanelText.includes("successSoundVolumeValue") &&
-    !sidepanelText.includes("Sound blocked"),
-  "completion sound should use audible local Web Audio at fixed full volume, preview style changes without page celebration noise, unlock on write action, and keep settings free of test-only playback UI"
+  !sidepanelText.includes("SUCCESS_SOUND_STYLES") &&
+    !sidepanelRuntimeText.includes("SUCCESS_SOUND_VOLUME") &&
+    !sidepanelRuntimeText.includes("SUCCESS_SOUND_PRESETS") &&
+    !sidepanelText.includes("successSoundNotes") &&
+    !sidepanelText.includes("primeSuccessAudio") &&
+    !sidepanelText.includes("previewSuccessFeedback") &&
+    !sidepanelText.includes("playSuccessSound") &&
+    !sidepanelText.includes("successAudioContext"),
+  "completion sound should be fully removed from the side panel"
 );
 assert.ok(
   backgroundText.includes("REMOTE_IMAGE_RETRY_DELAYS_MS = [0, 700, 1800]") &&

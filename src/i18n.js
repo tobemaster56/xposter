@@ -1,42 +1,17 @@
 (() => {
   const STORAGE_LANGUAGE = "xposter_language";
   const AUTO_LANGUAGE = "auto";
+  // Simplified Chinese only. English is kept as an internal fallback layer so any
+  // UI string without a Chinese translation still renders its English source text.
   const LANGUAGE_OPTIONS = [
-    { code: AUTO_LANGUAGE, nativeName: "Automatic", htmlLang: "en" },
-    { code: "en", nativeName: "English", htmlLang: "en" },
-    { code: "zh", nativeName: "中文", htmlLang: "zh-CN" },
-    { code: "zh-TW", nativeName: "繁體中文", htmlLang: "zh-TW" },
-    { code: "ja", nativeName: "日本語", htmlLang: "ja" },
-    { code: "fr", nativeName: "Français", htmlLang: "fr" },
-    { code: "ru", nativeName: "Русский", htmlLang: "ru" },
-    { code: "es", nativeName: "Español", htmlLang: "es" },
-    { code: "de", nativeName: "Deutsch", htmlLang: "de" },
-    { code: "pt", nativeName: "Português", htmlLang: "pt" },
-    { code: "ko", nativeName: "한국어", htmlLang: "ko" }
+    { code: "zh", nativeName: "中文", htmlLang: "zh-CN" }
   ];
-  const LANGUAGE_ALIASES = new Map([
-    ["zh-cn", "zh"],
-    ["zh-hans", "zh"],
-    ["zh-sg", "zh"],
-    ["zh-tw", "zh-TW"],
-    ["zh-hant", "zh-TW"],
-    ["zh-hk", "zh-TW"],
-    ["ja-jp", "ja"],
-    ["fr-fr", "fr"],
-    ["fr-ca", "fr"],
-    ["ru-ru", "ru"],
-    ["es-es", "es"],
-    ["es-mx", "es"],
-    ["de-de", "de"],
-    ["pt-br", "pt"],
-    ["pt-pt", "pt"],
-    ["ko-kr", "ko"]
-  ]);
-  const SUPPORTED_LANGUAGES = new Set(LANGUAGE_OPTIONS.filter((item) => item.code !== AUTO_LANGUAGE).map((item) => item.code));
+  const SUPPORTED_LANGUAGES = new Set(["zh"]);
+  const MESSAGE_LANGUAGES = ["en", "zh"];
   const LANGUAGE_META = new Map(LANGUAGE_OPTIONS.map((item) => [item.code, item]));
-  const LANGUAGE_FALLBACKS = new Map([["zh-TW", ["zh"]]]);
-  const messages = Object.fromEntries(Array.from(SUPPORTED_LANGUAGES, (language) => [language, {}]));
-  const reverse = Object.fromEntries(Array.from(SUPPORTED_LANGUAGES, (language) => [language, new Map()]));
+  const LANGUAGE_FALLBACKS = new Map();
+  const messages = Object.fromEntries(MESSAGE_LANGUAGES.map((language) => [language, {}]));
+  const reverse = Object.fromEntries(MESSAGE_LANGUAGES.map((language) => [language, new Map()]));
   const missing = new Set();
   let currentPreference = AUTO_LANGUAGE;
   let currentLanguage = preferredLanguage();
@@ -46,20 +21,15 @@
   }
 
   function normalizeLanguage(language) {
-    const value = String(language || "").replace("_", "-");
-    const lowerValue = value.toLowerCase();
-    if (lowerValue === AUTO_LANGUAGE || lowerValue === "system" || lowerValue === "browser") return preferredLanguage();
-    if (LANGUAGE_ALIASES.has(lowerValue)) return LANGUAGE_ALIASES.get(lowerValue);
-    const primary = lowerValue.split("-")[0];
-    if (SUPPORTED_LANGUAGES.has(primary)) return primary;
-    return "en";
+    const lower = String(language || "").replace("_", "-").toLowerCase();
+    if (lower === "en" || lower.split("-")[0] === "en") return "en";
+    return "zh";
   }
 
   function normalizeLanguagePreference(language) {
-    const value = String(language || "").replace("_", "-");
-    const lowerValue = value.toLowerCase();
-    if (lowerValue === AUTO_LANGUAGE || lowerValue === "system" || lowerValue === "browser") return AUTO_LANGUAGE;
-    return normalizeLanguage(value);
+    const lower = String(language || "").replace("_", "-").toLowerCase();
+    if (lower === AUTO_LANGUAGE || lower === "system" || lower === "browser") return AUTO_LANGUAGE;
+    return normalizeLanguage(language);
   }
 
   function resolvePreference(preference = currentPreference) {
@@ -67,13 +37,8 @@
   }
 
   function preferredLanguage() {
-    const candidates = [navigator.language, ...(Array.isArray(navigator.languages) ? navigator.languages : [])];
-    for (const candidate of candidates) {
-      const value = String(candidate || "").toLowerCase().replace("_", "-");
-      const normalized = LANGUAGE_ALIASES.get(value) || value.split("-")[0];
-      if (SUPPORTED_LANGUAGES.has(normalized)) return normalized;
-    }
-    return "en";
+    // The side panel ships in Simplified Chinese only.
+    return "zh";
   }
 
   function rebuildReverse() {
@@ -120,10 +85,6 @@
     ]));
   }
 
-  function toTraditionalChinese(value) {
-    return window.xPosterShared?.toTraditionalChinese?.(value) || String(value ?? "");
-  }
-
   function interpolate(template, values = {}) {
     return String(template ?? "").replace(/\{(\w+)\}/g, (_, key) => String(values[key] ?? ""));
   }
@@ -131,19 +92,14 @@
   function t(key, values = {}) {
     const normalizedKey = sourceKey(key);
     let source = null;
-    let sourceLanguage = "";
     for (const language of languageChain(currentLanguage)) {
       if (messages[language]?.[normalizedKey] == null) continue;
       source = messages[language][normalizedKey];
-      sourceLanguage = language;
       break;
     }
     if (source == null) {
       if (currentLanguage !== "en") missing.add(normalizedKey);
       return interpolate(normalizedKey, values);
-    }
-    if (currentLanguage === "zh-TW" && sourceLanguage === "zh") {
-      return interpolate(toTraditionalChinese(source), values);
     }
     return interpolate(source, values);
   }
@@ -191,13 +147,7 @@
   }
 
   async function restoreLanguage({ render = true } = {}) {
-    if (hasChromeStorage()) {
-      const stored = await chrome.storage.local.get(STORAGE_LANGUAGE).catch(() => ({}));
-      if (stored[STORAGE_LANGUAGE]) {
-        return setLanguage(stored[STORAGE_LANGUAGE], { persist: false, render });
-      }
-    }
-    return setLanguage(currentPreference, { persist: false, render });
+    return setLanguage(AUTO_LANGUAGE, { persist: false, render });
   }
 
   function language() {
@@ -209,7 +159,7 @@
   }
 
   function htmlLang(language = currentLanguage) {
-    return LANGUAGE_META.get(normalizeLanguage(language))?.htmlLang || "en";
+    return LANGUAGE_META.get(normalizeLanguage(language))?.htmlLang || "zh-CN";
   }
 
   function languageOptions() {

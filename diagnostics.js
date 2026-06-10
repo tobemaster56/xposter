@@ -166,12 +166,6 @@ const TEXT = {
 };
 
 i18n?.registerMessages(TEXT);
-i18n?.registerMessages({
-  "zh-TW": Object.fromEntries(Object.entries(TEXT.zh).map(([key, value]) => [
-    key,
-    window.xPosterShared?.toTraditionalChinese?.(value) || value
-  ]))
-});
 
 const SUMMARY_LABELS = [
   ["target", "summaryTarget"],
@@ -197,11 +191,11 @@ function hasChromeStorage() {
 }
 
 function preferredLanguage() {
-  return i18n?.preferredLanguage?.() || (/^zh\b/i.test(navigator.language || "") ? "zh" : "en");
+  return "zh";
 }
 
 function language() {
-  return i18n?.language?.() || currentLanguage || "en";
+  return "zh";
 }
 
 function t(key, values = {}) {

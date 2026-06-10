@@ -12,8 +12,6 @@
     STORAGE_LANGUAGE,
     STORAGE_THEME,
     STORAGE_IMPORT_OPTIONS,
-    STORAGE_ARTICLE_EXPORT_SETTINGS,
-    STORAGE_SUCCESS_FEEDBACK,
     STORAGE_RECORD_HISTORY,
     STORAGE_DRAFT_QUEUE,
     STORAGE_TARGET_TAB,
@@ -44,10 +42,6 @@
     STARTUP_STORAGE_KEYS,
     SYNTAX_HIGHLIGHT_DETAIL_LIMIT,
     THEME_MODES,
-    SUCCESS_SOUND_VOLUME,
-    SUCCESS_SOUND_PRESETS,
-    SUCCESS_SOUND_STYLES,
-    SUCCESS_CELEBRATION_COLORS,
     CONTENT_VERSION_UNKNOWN,
     EXTENSION_PATH
   } = sidepanelConfig;
@@ -131,10 +125,6 @@
   let importCancelRequested = false;
   let uploadRetryRequested = false;
   let importOptions = { setTitle: true, setCover: true, smartPunctuation: false };
-  let successFeedbackOptions = { confetti: true, sound: true, soundStyle: "soft" };
-  let articleExportOptions = { enabled: true, mode: "copy" };
-  let successAudioContext = null;
-  let lastSuccessFeedbackKey = "";
   let draftEditorMode = "edit";
   let recordEditMode = "edit";
   let draftEditorHistory = sidepanelEditor.createEditorHistory();
@@ -145,7 +135,6 @@
   let draftDropActionStatus = null;
   let remoteImageAccessStatus = { origins: [], available: [], missing: [], checkedAt: null };
   let remoteImageProbeStatus = { state: "idle", total: 0, ok: 0, fail: 0, results: [], checkedAt: null };
-  let languageOptionButtons = [];
 
   const sidepanelMessages = window.xPosterSidepanelMessages?.register?.(i18n, shared, {
     X_ARTICLE_MEDIA_LIMIT_WARNING,
@@ -187,8 +176,8 @@
     return i18n?.preferredLanguage?.() || (/^zh\b/i.test(navigator.language || "") ? "zh" : "en");
   }
 
-  function isChineseLanguage(language = currentLanguage) {
-    return String(language || "").startsWith("zh");
+  function isChineseLanguage() {
+    return true;
   }
 
   function normalizeThemeMode(mode) {
@@ -228,10 +217,6 @@
 
   function collectEditorCommandButtons(toolbar) {
     return toolbar ? Array.from(toolbar.querySelectorAll("[data-editor-command]")) : [];
-  }
-
-  function collectLanguageOptionButtons() {
-    return els.languageOptionsList ? Array.from(els.languageOptionsList.querySelectorAll("[data-language-option]")) : [];
   }
 
   function collectLiveResultInputItems() {
@@ -867,164 +852,6 @@
     applyImportOptions(importOptions);
   }
 
-  function normalizeArticleExportOptions(options = {}) {
-    return {
-      enabled: options.enabled !== false,
-      mode: options.mode === "download" ? "download" : "copy"
-    };
-  }
-
-  function syncArticleExportControls() {
-    setBooleanPropertyIfChanged(els.articleExportOption, "checked", articleExportOptions.enabled !== false);
-  }
-
-  function applyArticleExportOptions(options = articleExportOptions) {
-    articleExportOptions = normalizeArticleExportOptions(options);
-    syncArticleExportControls();
-  }
-
-  async function setArticleExportOptions(nextOptions, { persist = true } = {}) {
-    applyArticleExportOptions(nextOptions);
-    if (persist && hasChromeApi()) {
-      await chrome.storage.local.set({ [STORAGE_ARTICLE_EXPORT_SETTINGS]: normalizeArticleExportOptions(articleExportOptions) });
-    }
-  }
-
-  async function restoreArticleExportOptions() {
-    if (hasChromeApi()) {
-      const stored = await startupStorage();
-      applyArticleExportOptions(stored[STORAGE_ARTICLE_EXPORT_SETTINGS] || articleExportOptions);
-      return;
-    }
-    applyArticleExportOptions(articleExportOptions);
-  }
-
-  function normalizeSuccessFeedbackOptions(options = {}) {
-    return {
-      confetti: options.confetti !== false,
-      sound: options.sound !== false,
-      soundStyle: SUCCESS_SOUND_STYLES.has(options.soundStyle) ? options.soundStyle : "soft"
-    };
-  }
-
-  function successFeedbackPayload() {
-    return normalizeSuccessFeedbackOptions(successFeedbackOptions);
-  }
-
-  function syncSuccessFeedbackControls() {
-    setBooleanPropertyIfChanged(els.confettiOption, "checked", successFeedbackOptions.confetti !== false);
-    setBooleanPropertyIfChanged(els.successSoundOption, "checked", successFeedbackOptions.sound !== false);
-    setPropertyValueIfChanged(els.successSoundStyle, "value", successFeedbackOptions.soundStyle || "soft");
-    const soundEnabled = successFeedbackOptions.sound !== false;
-    setBooleanPropertyIfChanged(els.successSoundStyle, "disabled", !soundEnabled);
-  }
-
-  function applySuccessFeedbackOptions(options = successFeedbackOptions) {
-    successFeedbackOptions = normalizeSuccessFeedbackOptions(options);
-    syncSuccessFeedbackControls();
-  }
-
-  async function setSuccessFeedbackOptions(nextOptions, { persist = true } = {}) {
-    applySuccessFeedbackOptions(nextOptions);
-    if (persist && hasChromeApi()) {
-      await chrome.storage.local.set({ [STORAGE_SUCCESS_FEEDBACK]: successFeedbackPayload() });
-    }
-  }
-
-  async function restoreSuccessFeedbackOptions() {
-    if (hasChromeApi()) {
-      const stored = await startupStorage();
-      applySuccessFeedbackOptions(stored[STORAGE_SUCCESS_FEEDBACK] || successFeedbackOptions);
-      return;
-    }
-    applySuccessFeedbackOptions(successFeedbackOptions);
-  }
-
-  function ensureSuccessAudioContext({ force = false } = {}) {
-    if (!successFeedbackOptions.sound) return null;
-    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContextCtor) return null;
-    if (!successAudioContext || successAudioContext.state === "closed" || force) successAudioContext = new AudioContextCtor();
-    return successAudioContext;
-  }
-
-  async function primeSuccessAudio() {
-    const context = ensureSuccessAudioContext();
-    if (!context) return false;
-    if (context.state === "suspended") {
-      try {
-        await context.resume();
-      } catch {
-        return false;
-      }
-    }
-    return context.state === "running";
-  }
-
-  function successSoundNotes(style = successFeedbackOptions.soundStyle) {
-    return SUCCESS_SOUND_PRESETS[style] || SUCCESS_SOUND_PRESETS.soft;
-  }
-
-  async function playSuccessSound({ force = false } = {}) {
-    const context = ensureSuccessAudioContext({ force });
-    if (!context) return;
-    if (context.state === "suspended") {
-      try {
-        await context.resume();
-      } catch {
-        return;
-      }
-    }
-    if (context.state === "closed" || context.state === "suspended") return;
-    const now = context.currentTime + 0.01;
-    const sound = successSoundNotes();
-    const master = context.createGain();
-    master.gain.setValueAtTime(0.0001, now);
-    master.gain.exponentialRampToValueAtTime(sound.master * SUCCESS_SOUND_VOLUME, now + 0.018);
-    const releaseAt = now + Math.max(0.48, ...sound.notes.map((note) => note.start + note.duration + 0.06));
-    master.gain.exponentialRampToValueAtTime(0.0001, releaseAt);
-    master.connect(context.destination);
-
-    sound.notes.forEach((note) => {
-      const osc = context.createOscillator();
-      const gain = context.createGain();
-      const start = now + note.start;
-      const end = start + note.duration;
-      osc.type = note.type || "sine";
-      osc.frequency.setValueAtTime(note.frequency, start);
-      gain.gain.setValueAtTime(0.0001, start);
-      gain.gain.exponentialRampToValueAtTime(note.gain || 0.3, start + 0.018);
-      gain.gain.exponentialRampToValueAtTime(0.0001, end);
-      osc.connect(gain).connect(master);
-      osc.start(start);
-      osc.stop(end + 0.03);
-    });
-  }
-
-  async function requestPageSuccessCelebration(summary = null) {
-    if (!successFeedbackOptions.confetti) return;
-    await sendToTargetTab({
-      type: "xposter:success-celebration",
-      summary: {
-        elapsedMs: Number(summary?.elapsedMs || 0),
-        warnings: Number(summary?.mediaWarnings?.total || 0) + Number(summary?.main?.imgFail || 0)
-      },
-      colors: SUCCESS_CELEBRATION_COLORS
-    }).catch(() => null);
-  }
-
-  function triggerSuccessFeedback(summary = null) {
-    const key = String(latestProgress?.startedAt || summary?.elapsedMs || Date.now());
-    if (key && key === lastSuccessFeedbackKey) return;
-    lastSuccessFeedbackKey = key;
-    if (successFeedbackOptions.confetti) void requestPageSuccessCelebration(summary);
-    if (successFeedbackOptions.sound) void playSuccessSound();
-  }
-
-  async function previewSuccessFeedback() {
-    if (successFeedbackOptions.sound) await playSuccessSound();
-  }
-
   function applyTheme(mode = currentThemeMode) {
     currentThemeMode = normalizeThemeMode(mode);
     const resolvedTheme = resolveTheme(currentThemeMode);
@@ -1068,15 +895,13 @@
     const source = sourceText(text);
     if (i18n) {
       const translated = i18n.t(source);
-      if (translated !== source || !isChineseLanguage()) return translated;
+      if (translated !== source) return translated;
     }
-    if (!isChineseLanguage()) return source;
     const direct = ZH_TEXT.get(source);
-    if (direct) return currentLanguage === "zh-TW" ? shared.toTraditionalChinese(direct) : direct;
+    if (direct) return direct;
     const pattern = translatePatternText(source);
-    if (pattern !== source) return currentLanguage === "zh-TW" ? shared.toTraditionalChinese(pattern) : pattern;
-    const compound = translateCompoundText(source);
-    return currentLanguage === "zh-TW" ? shared.toTraditionalChinese(compound) : compound;
+    if (pattern !== source) return pattern;
+    return translateCompoundText(source);
   }
 
   function sourceText(text) {
@@ -1160,7 +985,7 @@
   }
 
   function syncLanguageEnvironment() {
-    document.documentElement.lang = i18n?.htmlLang?.(currentLanguage) || (currentLanguage === "zh" ? "zh-CN" : "en");
+    document.documentElement.lang = i18n?.htmlLang?.(currentLanguage) || "zh-CN";
     setDatasetValueIfChanged(document.body, "language", currentLanguage);
     setDatasetValueIfChanged(document.body, "languagePreference", i18n?.preference?.() || currentLanguage);
   }
@@ -1209,112 +1034,6 @@
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(callback);
     });
-  }
-
-  function languageOptionLabel(option) {
-    if (!option) return "";
-    return option.code === "auto" ? localizeText("Automatic") : option.nativeName;
-  }
-
-  function closeLanguageMenu({ focusButton = false } = {}) {
-    if (!els.languageOptionsList || !els.languageSelectButton) return;
-    setBooleanPropertyIfChanged(els.languageOptionsList, "hidden", true);
-    setAttributeValueIfChanged(els.languageSelectButton, "aria-expanded", "false");
-    if (focusButton) els.languageSelectButton.focus();
-  }
-
-  function syncLanguageButton() {
-    if (!els.languageSelect || !els.languageSelectValue || !els.languageOptionsList) return;
-    const value = els.languageSelect.value;
-    const selectedOption = els.languageSelect.selectedOptions?.[0];
-    const selectedLabel = selectedOption?.textContent || languageOptionLabel(i18n?.languageOptions?.().find((option) => option.code === value)) || value;
-    setTextContentIfChanged(els.languageSelectValue, selectedLabel);
-    languageOptionButtons.forEach((button) => {
-      const selected = button.dataset.languageOption === value;
-      setAttributeValueIfChanged(button, "aria-selected", selected ? "true" : "false");
-      setNumericPropertyIfChanged(button, "tabIndex", selected ? 0 : -1);
-    });
-  }
-
-  function openLanguageMenu() {
-    if (!els.languageOptionsList || !els.languageSelectButton) return;
-    setBooleanPropertyIfChanged(els.languageOptionsList, "hidden", false);
-    setAttributeValueIfChanged(els.languageSelectButton, "aria-expanded", "true");
-    syncLanguageButton();
-    const selected = languageOptionButtons.find((button) => button.getAttribute("aria-selected") === "true");
-    selected?.focus?.();
-  }
-
-  function toggleLanguageMenu() {
-    if (!els.languageOptionsList) return;
-    if (els.languageOptionsList.hidden) openLanguageMenu();
-    else closeLanguageMenu({ focusButton: true });
-  }
-
-  function focusLanguageOption(delta) {
-    if (!els.languageOptionsList || els.languageOptionsList.hidden) return;
-    const options = languageOptionButtons;
-    if (!options.length) return;
-    const currentIndex = Math.max(0, options.indexOf(document.activeElement));
-    const nextIndex = (currentIndex + delta + options.length) % options.length;
-    options.forEach((option, index) => {
-      setNumericPropertyIfChanged(option, "tabIndex", index === nextIndex ? 0 : -1);
-    });
-    options[nextIndex].focus();
-  }
-
-  function handleLanguageButtonKeydown(event) {
-    if (event.key !== "ArrowDown" && event.key !== "ArrowUp" && event.key !== "Enter" && event.key !== " ") return;
-    event.preventDefault();
-    openLanguageMenu();
-    if (event.key === "ArrowUp") focusLanguageOption(-1);
-  }
-
-  function handleLanguageOptionsKeydown(event) {
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      focusLanguageOption(event.key === "ArrowDown" ? 1 : -1);
-      return;
-    }
-    if (event.key === "Escape") {
-      event.preventDefault();
-      closeLanguageMenu({ focusButton: true });
-      return;
-    }
-    if (event.key === "Enter" || event.key === " ") {
-      const option = event.target.closest?.("[data-language-option]");
-      if (!option) return;
-      event.preventDefault();
-      setLanguage(option.dataset.languageOption);
-      closeLanguageMenu({ focusButton: true });
-    }
-  }
-
-  function populateLanguageSelect() {
-    if (!els.languageSelect || !i18n?.languageOptions) return;
-    const options = i18n.languageOptions();
-    const selectHtml = options
-      .map((option) => {
-        const label = languageOptionLabel(option);
-        return `<option value="${shared.escapeHtml(option.code)}">${shared.escapeHtml(label)}</option>`;
-      })
-      .join("");
-    setSourceHtmlIfChanged(els.languageSelect, selectHtml);
-    setPropertyValueIfChanged(els.languageSelect, "value", i18n.preference?.() || currentLanguage);
-    if (els.languageOptionsList) {
-      const optionsHtml = options
-        .map((option) => {
-          const label = shared.escapeHtml(languageOptionLabel(option));
-          const value = shared.escapeHtml(option.code);
-          return `<button class="language-option" type="button" role="option" data-language-option="${value}" aria-selected="false" tabindex="-1">${label}</button>`;
-        })
-        .join("");
-      setSourceHtmlIfChanged(els.languageOptionsList, optionsHtml);
-      languageOptionButtons = collectLanguageOptionButtons();
-    } else {
-      languageOptionButtons = [];
-    }
-    syncLanguageButton();
   }
 
   function setLocalizedText(node, source) {
@@ -1470,7 +1189,7 @@
     if (!root.contains?.(els.evidenceText) && root !== els.evidenceText) return;
     const source = "Run a publishing check or import to save a record.";
     const current = els.evidenceText.textContent.trim();
-    if (current === source || current === ZH_TEXT.get(source) || current === shared.toTraditionalChinese(ZH_TEXT.get(source))) {
+    if (current === source || current === ZH_TEXT.get(source)) {
       setLocalizedTextIfChanged(els.evidenceText, source);
     }
   }
@@ -1483,7 +1202,6 @@
       currentLanguage = preference === "zh" ? "zh" : "en";
     }
     translateVisibleWorkspace();
-    populateLanguageSelect();
     updateDraftBrief();
     updateDraftEditorStatus();
     if (recordHistoryRestored || els.recordsPanel?.classList.contains("active")) renderRecordHistory();
@@ -1846,7 +1564,6 @@
     if (!parsed?.segments?.length) {
       return {
         bodyImages: 0,
-        tables: 0,
         coverOnly: 0,
         total: 0,
         nearSoftLimit: false,
@@ -1855,7 +1572,6 @@
     }
     const coverSource = importOptions.setCover === false ? "" : String(parsed.cover || "").trim();
     let bodyImages = 0;
-    let tables = 0;
     let coverInBody = false;
     for (const segment of parsed.segments) {
       if (segment.type === "image") {
@@ -1863,15 +1579,12 @@
         if (coverSource && !coverInBody && shared.imageSourcesMatch(segment.source, coverSource)) {
           coverInBody = true;
         }
-      } else if (segment.type === "table") {
-        tables += 1;
       }
     }
     const coverOnly = coverSource && !coverInBody ? 1 : 0;
-    const total = bodyImages + tables + coverOnly;
+    const total = bodyImages + coverOnly;
     return {
       bodyImages,
-      tables,
       coverOnly,
       total,
       nearSoftLimit: total >= X_ARTICLE_MEDIA_HEADROOM_THRESHOLD && total <= X_ARTICLE_MEDIA_SOFT_LIMIT,
@@ -1886,7 +1599,6 @@
   function mediaUploadEstimateForParsedDrafts(parsedDrafts = []) {
     const totals = {
       bodyImages: 0,
-      tables: 0,
       coverOnly: 0,
       total: 0,
       nearSoftLimit: false,
@@ -1897,7 +1609,6 @@
       try {
         const estimate = mediaUploadEstimate(item.parsed);
         totals.bodyImages += estimate.bodyImages || 0;
-        totals.tables += estimate.tables || 0;
         totals.coverOnly += estimate.coverOnly || 0;
         totals.total += estimate.total || 0;
         totals.nearSoftLimit = totals.nearSoftLimit || Boolean(estimate.nearSoftLimit);
@@ -2112,9 +1823,9 @@
     if (!Number.isFinite(count)) return "0";
     const abs = Math.abs(count);
     if (isChineseLanguage()) {
-      const tenThousandUnit = currentLanguage === "zh-TW" ? "萬" : "万";
+      const tenThousandUnit = "万";
       if (zhTenThousand && abs >= 10000) return formatCompactNumber(count / 10000, tenThousandUnit);
-      return new Intl.NumberFormat(currentLanguage === "zh-TW" ? "zh-Hant" : "zh-Hans").format(count);
+      return new Intl.NumberFormat("zh-Hans").format(count);
     }
     const format = (divisor, unit) => {
       const value = count / divisor;
@@ -2133,7 +1844,7 @@
 
   function formatCompactUnit(count, enSingular, enPlural, zhUnit, options = {}) {
     const formatted = formatCompactCount(count, options);
-    if (isChineseLanguage()) return `${formatted} ${currentLanguage === "zh-TW" ? shared.toTraditionalChinese(zhUnit) : zhUnit}`;
+    if (isChineseLanguage()) return `${formatted} ${zhUnit}`;
     return `${formatted} ${Number(count || 0) === 1 ? enSingular : enPlural}`;
   }
 
@@ -3490,9 +3201,9 @@
         indexLabel: String(index),
         kind: "table",
         label: "Markdown table",
-        detail: `${segment.headers.length} column(s), ${segment.rows.length} row(s); rendered to ${operation?.op?.file?.fileName || "table image"}.`,
-        path: "Upload media",
-        tone: state.uploadReady ? "ok" : "warn"
+        detail: `${segment.headers.length} column(s), ${segment.rows.length} row(s); placed as a Markdown table block.`,
+        path: "Table",
+        tone: state.bridgeReady ? "ok" : "warn"
       };
     }
     if (segment.type === "tweet") {
@@ -3655,11 +3366,11 @@
       {
         id: "table",
         label: "Tables",
-        tone: counts.table ? (uploadReady ? "ok" : "warn") : "idle",
+        tone: counts.table ? (bridgeReady ? "ok" : "warn") : "idle",
         detail: counts.table
-          ? uploadReady
-            ? "Tables render to PNG and upload through X."
-            : "Open the X editor and run Check so table images can upload."
+          ? bridgeReady
+            ? "Tables are placed as Markdown table blocks."
+            : "Open the X editor and run Check so tables can be placed."
           : "No tables detected.",
         count: counts.table || 0
       },
@@ -4051,7 +3762,6 @@
   }
 
   async function runImportButtonAction() {
-    await primeSuccessAudio();
     const checks = buildPreflightChecks();
     const byId = indexPreflightChecks(checks);
     const gate = getImportGate(checks, { byId });
@@ -4570,9 +4280,8 @@
     const status = latestPageStatus || {};
     const main = latestDiagnostics?.main || {};
     const vault = status.vault || latestDiagnostics?.vault || {};
-    const specialBlocks = (counts.code || 0) + (counts.divider || 0) + (counts.tweet || 0);
+    const specialBlocks = (counts.code || 0) + (counts.divider || 0) + (counts.tweet || 0) + (counts.table || 0);
     const images = counts.image || 0;
-    const tables = counts.table || 0;
     const remoteImageList = Array.isArray(context.parsedDrafts)
       ? remoteHttpImageSegmentsForParsedDrafts(context.parsedDrafts)
       : markdowns
@@ -4666,15 +4375,15 @@
       {
         id: "uploads",
         label: "Uploads",
-        tone: images || tables
+        tone: images
           ? (main.hasOnFilesAdded ? "ok" : latestDiagnostics ? "error" : "warn")
           : "ok",
         detail:
-          images || tables
+          images
             ? main.hasOnFilesAdded
-              ? `${images + tables} media upload item(s) can upload through X.`
-              : "Open the X editor and run Check so images and tables can upload."
-            : "No image or table uploads required."
+              ? `${images} media upload item(s) can upload through X.`
+              : "Open the X editor and run Check so images can upload."
+            : "No image uploads required."
       },
       {
         id: "assets",
@@ -4697,7 +4406,7 @@
         label: "Import plan",
         tone: hasPlan ? "ok" : "error",
         detail: hasPlan
-          ? `${specialBlocks} embed/code/divider item(s), ${images} image(s), ${tables} table image(s), ${counts.tweet || 0} tweet embed(s).`
+          ? `${specialBlocks} embed/code/divider/table item(s), ${images} image(s), ${counts.tweet || 0} tweet embed(s).`
           : "No import plan available yet."
       }
     ];
@@ -5060,7 +4769,6 @@
 
   function resetLiveProgress(reason = "manual") {
     latestProgress = createLiveProgressState();
-    if (reason === "import") lastSuccessFeedbackKey = "";
     if (reason === "import") {
       window.clearTimeout(runSummaryCollapseTimer);
       runSummaryCollapseTimer = null;
@@ -5378,7 +5086,7 @@
     if (/prepar|准备/i.test(text)) return localizeText("Preparing Markdown, images, and the X editor.");
     if (/title|cover|标题|封面/i.test(text)) return localizeText("Setting article title and matching cover after ordered uploads.");
     if (/writing|paste|structured|写入/i.test(text)) return localizeText("Writing the article body into X.");
-    if (/upload|上传/i.test(text)) return localizeText("Uploading prepared images and rendered tables through X.");
+    if (/upload|上传/i.test(text)) return localizeText("Uploading prepared images through X.");
     if (/reorder|marker|special|insert|放置|清理/i.test(text)) return localizeText("Placing images, tweets, code, and dividers into the article.");
     if (/imported|written|complete|完成|已写入/i.test(text)) return localizeText("Writing finished.");
     return text ? localizeText(text) : localizeText("Live status received from the active X tab.");
@@ -5521,7 +5229,6 @@
 
   function paintStartupShell() {
     applyTheme(currentThemeMode);
-    populateLanguageSelect();
     setDraftEditorMode("edit", { syntax: "none" });
     syncPanelLayout();
     restoreVaultState();
@@ -5535,8 +5242,6 @@
     if (!hasChromeApi()) {
       applyTheme(currentThemeMode);
       applyImportOptions(importOptions, { refresh: false });
-      applyArticleExportOptions(articleExportOptions);
-      applySuccessFeedbackOptions(successFeedbackOptions);
       await restoreLanguage();
       analyzeDraft();
       return;
@@ -5545,8 +5250,6 @@
     await restoreTargetTab(stored);
     applyTheme(stored[STORAGE_THEME] || currentThemeMode);
     applyImportOptions(stored[STORAGE_IMPORT_OPTIONS] || importOptions, { refresh: false });
-    applyArticleExportOptions(stored[STORAGE_ARTICLE_EXPORT_SETTINGS] || articleExportOptions);
-    applySuccessFeedbackOptions(stored[STORAGE_SUCCESS_FEEDBACK] || successFeedbackOptions);
     applyStartupDraftState(stored);
     await restoreLanguage();
     for (const { input } of getLiveResultItems()) {
@@ -6090,9 +5793,6 @@
       renderRunSummary(response.summary);
       captureEvidence("import", { result: response, targetContext: target.targetContext, pageStatus: latestPageStatus, diagnostics: latestDiagnostics });
       markActiveQueueItemWritten();
-      if (!batch || draftQueue.length === 0) {
-        triggerSuccessFeedback(response.summary);
-      }
     } else {
       log(`Import failed: ${response?.error || "unknown error"}`);
       if (response?.cancelled) {
@@ -8269,22 +7969,6 @@
     jumpToSection("verify");
     log("Live verification runbook focused.");
   });
-  els.languageSelect?.addEventListener("change", () => {
-    setLanguage(els.languageSelect.value);
-  });
-  els.languageSelectButton?.addEventListener("click", toggleLanguageMenu);
-  els.languageSelectButton?.addEventListener("keydown", handleLanguageButtonKeydown);
-  els.languageOptionsList?.addEventListener("click", (event) => {
-    const option = event.target.closest("[data-language-option]");
-    if (!option) return;
-    setLanguage(option.dataset.languageOption);
-    closeLanguageMenu({ focusButton: true });
-  });
-  els.languageOptionsList?.addEventListener("keydown", handleLanguageOptionsKeydown);
-  document.addEventListener("click", (event) => {
-    if (els.languageControl?.contains(event.target)) return;
-    closeLanguageMenu();
-  });
   els.themeChoice?.addEventListener("change", (event) => {
     const input = event.target.closest('input[name="themeMode"]');
     if (input) setTheme(input.value);
@@ -8301,26 +7985,6 @@
       ...importOptions,
       smartPunctuation: els.smartPunctuationOption?.checked === true
     });
-  });
-  els.articleExportOptions?.addEventListener("change", () => {
-    setArticleExportOptions({
-      ...articleExportOptions,
-      enabled: els.articleExportOption?.checked !== false
-    });
-  });
-  els.successFeedbackOptions?.addEventListener("change", () => {
-    setSuccessFeedbackOptions({
-      confetti: els.confettiOption?.checked !== false,
-      sound: els.successSoundOption?.checked !== false,
-      soundStyle: els.successSoundStyle?.value || "soft"
-    });
-  });
-  els.successSoundStyle?.addEventListener("change", () => {
-    void setSuccessFeedbackOptions({
-      ...successFeedbackOptions,
-      soundStyle: els.successSoundStyle.value || "soft"
-    });
-    void previewSuccessFeedback();
   });
   els.liveRunbookList.addEventListener("click", async (event) => {
     const button = event.target.closest("button[data-runbook-action]");

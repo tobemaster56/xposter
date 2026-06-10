@@ -21,8 +21,6 @@
   const LOCAL_STORE = "handles";
   const VAULT_KEY = "vault_root";
   const MAX_IMAGE_BYTES = 16 * 1024 * 1024;
-  const MAX_TABLE_IMAGE_PIXELS = 16 * 1000 * 1000;
-  const MAX_TABLE_IMAGE_CELLS = 1200;
   const SUPPORTED_IMAGE_MIME_TYPES = new Set([
     "image/png",
     "image/jpeg",
@@ -589,13 +587,17 @@
       });
     }
 
-    const obsidianImage = /^[ \t]*!\[\[([^\]]+)\]\][ \t]*$/gm;
+    // Obsidian embeds (![[file]]) can appear inline or inside list items, not just
+    // on their own line. Match anywhere; the leading list marker/text before the
+    // embed is handled by parseTextBlocks just like standard ![](...) images.
+    // The optional "|alias" / "|size" suffix is stripped so only the file path remains.
+    const obsidianImage = /!\[\[([^\]]+)\]\]/g;
     while ((match = obsidianImage.exec(markdown)) !== null) {
       if (overlaps(spans, match.index)) continue;
       spans.push({
         start: match.index,
         end: match.index + match[0].length,
-        segment: { type: "image", source: match[1].trim(), alt: "" }
+        segment: { type: "image", source: match[1].split("|")[0].trim(), alt: "" }
       });
     }
 
@@ -1007,15 +1009,21 @@
     };
   }
 
+  function escapeTableCell(value) {
+    return String(value ?? "")
+      .replace(/\r?\n/g, " ")
+      .replace(/\|/g, "\\|");
+  }
+
   function tableToMarkdown(table) {
     const lines = [];
-    lines.push(`| ${table.headers.join(" | ")} |`);
+    lines.push(`| ${table.headers.map(escapeTableCell).join(" | ")} |`);
     lines.push(
       `| ${table.alignments
         .map((alignment) => (alignment === "center" ? ":---:" : alignment === "right" ? "---:" : ":---"))
         .join(" | ")} |`
     );
-    for (const row of table.rows) lines.push(`| ${row.join(" | ")} |`);
+    for (const row of table.rows) lines.push(`| ${row.map(escapeTableCell).join(" | ")} |`);
     return lines.join("\n");
   }
 
@@ -1152,29 +1160,14 @@
       }
 
       if (segment.type === "table") {
-        const result = tableResults.get(segment);
-        if (result?.ok) {
-          const id = marker("TABLE");
-          html.push(`<p>${id}</p>`);
-          addBlock("unstyled", id);
-          plan.push({
-            marker: id,
-            op: {
-              type: "image",
-              file: {
-                base64: result.base64,
-                mime: result.mime,
-                fileName: result.fileName,
-                alt: "table"
-              },
-              fallbackText: tableToMarkdown(segment)
-            }
-          });
-        } else {
-          const fallback = tableToMarkdown(segment);
-          html.push(`<pre><code>${escapeHtml(fallback)}</code></pre>`);
-          addBlock("code-block", fallback);
-        }
+        const id = marker("TABLE");
+        const markdown = tableToMarkdown(segment);
+        html.push(`<p>${id}</p>`);
+        addBlock("unstyled", id);
+        plan.push({
+          marker: id,
+          op: { type: "atomic", entityType: "MARKDOWN", data: { markdown }, mutability: "MUTABLE" }
+        });
       }
     }
 
@@ -1546,92 +1539,6 @@
     return { ok: false, error: lastError?.message || "Local file not found", source };
   }
 
-  async function renderTableImage(table, fileName = `table-${Date.now()}.png`) {
-    const scale = Math.min(2, window.devicePixelRatio || 1);
-    const paddingX = 24;
-    const paddingY = 16;
-    const rowHeight = 42;
-    const minColumnWidth = 120;
-    const maxColumnWidth = 260;
-    const font = "14px ui-sans-serif, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
-
-    const measurer = document.createElement("canvas").getContext("2d");
-    measurer.font = font;
-    const columnCount = table.headers.length;
-    const rowCount = table.rows.length + 1;
-    if (columnCount * rowCount > MAX_TABLE_IMAGE_CELLS) {
-      throw new Error("Table is too large to render as an image");
-    }
-    const widths = Array.from({ length: columnCount }, (_, index) => {
-      const values = [table.headers[index], ...table.rows.map((row) => row[index] || "")];
-      const measured = Math.max(...values.map((value) => measurer.measureText(String(value)).width + paddingX * 2));
-      return Math.max(minColumnWidth, Math.min(maxColumnWidth, Math.ceil(measured)));
-    });
-
-    const width = widths.reduce((sum, value) => sum + value, 0);
-    const height = rowHeight * rowCount;
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.ceil(width * scale);
-    canvas.height = Math.ceil(height * scale);
-    if (canvas.width * canvas.height > MAX_TABLE_IMAGE_PIXELS) {
-      throw new Error("Table image would be too large to render");
-    }
-    canvas.style.width = `${width}px`;
-    canvas.style.height = `${height}px`;
-    const ctx = canvas.getContext("2d");
-    ctx.scale(scale, scale);
-    ctx.fillStyle = "#fbfaf7";
-    ctx.fillRect(0, 0, width, height);
-    ctx.font = font;
-    ctx.textBaseline = "middle";
-
-    let x = 0;
-    const drawCell = (text, column, row, isHeader) => {
-      const cellWidth = widths[column];
-      const y = row * rowHeight;
-      ctx.fillStyle = isHeader ? "#eeece6" : row % 2 ? "#fbfaf7" : "#f6f3ec";
-      ctx.fillRect(x, y, cellWidth, rowHeight);
-      ctx.strokeStyle = "#d8d2c6";
-      ctx.lineWidth = 1;
-      ctx.strokeRect(x + 0.5, y + 0.5, cellWidth, rowHeight);
-      ctx.fillStyle = "#201f1b";
-      ctx.font = isHeader
-        ? "600 14px ui-sans-serif, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
-        : font;
-      const alignment = table.alignments[column] || "left";
-      let textX = x + paddingX;
-      ctx.textAlign = "left";
-      if (alignment === "center") {
-        textX = x + cellWidth / 2;
-        ctx.textAlign = "center";
-      } else if (alignment === "right") {
-        textX = x + cellWidth - paddingX;
-        ctx.textAlign = "right";
-      }
-      ctx.fillText(String(text), textX, y + rowHeight / 2, cellWidth - paddingX * 2);
-      x += cellWidth;
-    };
-
-    x = 0;
-    table.headers.forEach((header, column) => drawCell(header, column, 0, true));
-    for (let rowIndex = 0; rowIndex < table.rows.length; rowIndex += 1) {
-      x = 0;
-      table.rows[rowIndex].forEach((cell, column) => drawCell(cell, column, rowIndex + 1, false));
-    }
-
-    const blob = await new Promise((resolve, reject) => {
-      canvas.toBlob((value) => (value ? resolve(value) : reject(new Error("Could not render table"))), "image/png");
-    });
-    const buffer = await blob.arrayBuffer();
-    return {
-      ok: true,
-      base64: arrayBufferToBase64(buffer),
-      mime: "image/png",
-      fileName,
-      bytes: buffer.byteLength
-    };
-  }
-
   const api = {
     looksLikeMarkdown,
     parseMarkdown,
@@ -1653,7 +1560,6 @@
     parseDataUri,
     arrayBufferToBase64,
     toTraditionalChinese,
-    renderTableImage,
     saveVaultHandle,
     getVaultRecord,
     clearVaultHandle,

@@ -779,33 +779,6 @@
 
       <section class="settings panel" data-panel="settings">
         <h2 data-i18n="Settings">Settings</h2>
-        <div class="setting-row setting-row-language">
-          <div>
-            <strong data-i18n="Language">Language</strong>
-            <span data-i18n="Choose the side panel language.">Choose the side panel language.</span>
-          </div>
-          <div class="language-control" id="languageControl">
-            <span data-i18n="Language">Language</span>
-            <select class="language-native-select" id="languageSelect" aria-label="Language" data-i18n-aria-label="Language" aria-hidden="true" tabindex="-1">
-              <option value="auto">Automatic</option>
-              <option value="en">English</option>
-              <option value="zh">中文</option>
-              <option value="zh-TW">繁體中文</option>
-              <option value="ja">日本語</option>
-              <option value="fr">Français</option>
-              <option value="ru">Русский</option>
-              <option value="es">Español</option>
-              <option value="de">Deutsch</option>
-              <option value="pt">Português</option>
-              <option value="ko">한국어</option>
-            </select>
-            <button class="language-select-button" id="languageSelectButton" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="languageOptionsList" aria-label="Language" data-i18n-aria-label="Language">
-              <span class="language-select-value" id="languageSelectValue">Automatic</span>
-              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg>
-            </button>
-            <div class="language-options" id="languageOptionsList" role="listbox" aria-label="Language" data-i18n-aria-label="Language" hidden></div>
-          </div>
-        </div>
         <div class="setting-row">
           <div>
             <strong data-i18n="Appearance">Appearance</strong>
@@ -869,55 +842,6 @@
                 </span>
               </label>
             </fieldset>
-          </div>
-        </div>
-        <div class="setting-row setting-row-stack">
-          <div>
-            <strong data-i18n="Article export">Article export</strong>
-            <span data-i18n="On published X Article pages, show Markdown tools beside the article title.">On published X Article pages, show Markdown tools beside the article title.</span>
-          </div>
-          <fieldset class="setting-checks" id="articleExportOptions" aria-label="Article export" data-i18n-aria-label="Article export">
-            <legend class="visually-hidden" data-i18n="Article export">Article export</legend>
-            <label>
-              <input type="checkbox" id="articleExportOption" checked />
-              <span>
-                <strong data-i18n="Published article Markdown tools">Published article Markdown tools</strong>
-                <em data-i18n="Copy or download a readable X Article as Markdown from its title area.">Copy or download a readable X Article as Markdown from its title area.</em>
-              </span>
-            </label>
-          </fieldset>
-        </div>
-        <div class="setting-row setting-row-stack">
-          <div>
-            <strong data-i18n="Success feedback">Success feedback</strong>
-            <span data-i18n="Choose the small celebration shown after a successful write.">Choose the small celebration shown after a successful write.</span>
-          </div>
-          <fieldset class="setting-checks" id="successFeedbackOptions" aria-label="Success feedback" data-i18n-aria-label="Success feedback">
-            <legend class="visually-hidden" data-i18n="Success feedback">Success feedback</legend>
-            <label>
-              <input type="checkbox" id="confettiOption" checked />
-              <span>
-                <strong data-i18n="Celebration animation">Celebration animation</strong>
-                <em data-i18n="Show a brief celebration on the X page when X reports a completed write.">Show a brief celebration on the X page when X reports a completed write.</em>
-              </span>
-            </label>
-            <label>
-              <input type="checkbox" id="successSoundOption" checked />
-              <span>
-                <strong data-i18n="Completion sound">Completion sound</strong>
-                <em data-i18n="Play a short local chime after a successful write.">Play a short local chime after a successful write.</em>
-              </span>
-            </label>
-          </fieldset>
-          <div class="setting-subcontrols setting-sound-controls">
-            <label class="setting-sound-style">
-              <span data-i18n="Sound style">Sound style</span>
-              <select id="successSoundStyle" aria-label="Sound style" data-i18n-aria-label="Sound style">
-                <option value="soft" data-i18n="Soft chime">Soft chime</option>
-                <option value="bell" data-i18n="Warm bell">Warm bell</option>
-                <option value="pop" data-i18n="Light pop">Light pop</option>
-              </select>
-            </label>
           </div>
         </div>
         <div class="setting-row setting-row-stack">

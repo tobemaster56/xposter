@@ -90,7 +90,6 @@ for (const [, key] of manifestText.matchAll(/__MSG_([A-Za-z0-9_]+)__/g)) {
 
 const sidepanelRuntimeText = SIDEPANEL_RUNTIME_FILES.map(readText).join("\n");
 const runtimeText = `${sidepanelRuntimeText}\n${readText("diagnostics.js")}`;
-const i18nText = readText("src/i18n.js");
 const runtimeKeys = new Set();
 for (const [, key] of runtimeText.matchAll(/"([^"\n]+)"\s*:\s*"[^"]*"/g)) {
   runtimeKeys.add(decodeJsString(key));
@@ -114,21 +113,6 @@ for (const key of htmlI18nKeys) {
 
 assertScriptOrder(sidepanelHtml, SIDEPANEL_SCRIPT_ORDER, "sidepanel.html");
 assertScriptOrder(diagnosticsHtml, DIAGNOSTICS_SCRIPT_ORDER, "diagnostics.html");
-
-for (const language of ["zh-TW", "ja", "fr", "ru"]) {
-  if (!i18nText.includes(`code: "${language}"`)) {
-    fail(`src/i18n.js must expose ${language} as a selectable language`);
-  }
-}
-if (!i18nText.includes("AUTO_LANGUAGE") || !i18nText.includes("normalizeLanguagePreference")) {
-  fail("src/i18n.js must support an automatic browser-language preference");
-}
-if (!i18nText.includes("LANGUAGE_FALLBACKS") || !i18nText.includes("toTraditionalChinese")) {
-  fail("src/i18n.js must provide zh-TW runtime fallback through Traditional Chinese conversion");
-}
-if (!runtimeText.includes('"zh-TW"')) {
-  fail("runtime UI messages must register zh-TW translations");
-}
 
 if (!process.exitCode) {
   console.log(`i18n check passed (${htmlI18nKeys.size} HTML runtime keys, ${enLocaleKeys.size} Chrome locale keys)`);

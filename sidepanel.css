@@ -149,106 +149,6 @@ button {
   gap: 8px;
 }
 
-.language-control {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 760;
-}
-
-.language-native-select {
-  position: absolute;
-  inline-size: 1px;
-  block-size: 1px;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.language-select-button {
-  height: 28px;
-  max-width: 108px;
-  display: inline-grid;
-  grid-template-columns: minmax(0, 1fr) 12px;
-  align-items: center;
-  gap: 6px;
-  padding: 0 8px 0 10px;
-  border: 1px solid var(--line);
-  border-radius: 0;
-  background: color-mix(in oklch, var(--paper), var(--paper-2) 35%);
-  color: var(--ink);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.language-select-button svg {
-  width: 12px;
-  height: 12px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.language-select-value {
-  min-width: 0;
-  overflow: hidden;
-  text-align: center;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.language-options {
-  position: absolute;
-  z-index: 8;
-  top: calc(100% + 5px);
-  right: 0;
-  width: 138px;
-  max-height: min(312px, calc(100dvh - 96px));
-  overflow: auto;
-  padding: 4px;
-  border: 1px solid color-mix(in oklch, var(--line), var(--ink) 8%);
-  background: var(--paper);
-  box-shadow: 0 12px 26px rgba(15, 20, 25, 0.14);
-}
-
-.language-options[hidden] {
-  display: none;
-}
-
-.language-option {
-  width: 100%;
-  min-height: 30px;
-  display: block;
-  padding: 0 8px;
-  border: 0;
-  background: transparent;
-  color: var(--ink);
-  cursor: pointer;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 740;
-  text-align: center;
-  white-space: nowrap;
-}
-
-.language-option:hover,
-.language-option:focus-visible {
-  outline: 0;
-  background: color-mix(in oklch, var(--signal), var(--paper) 91%);
-  color: var(--signal-text);
-}
-
-.language-option[aria-selected="true"] {
-  background: color-mix(in oklch, var(--signal), var(--paper) 86%);
-  color: var(--signal-text);
-}
-
 .eyebrow {
   margin: 0;
   color: var(--signal-text);
@@ -5037,29 +4937,6 @@ textarea:not(#markdown):focus-visible,
   font-weight: 800;
 }
 
-.setting-row .language-control {
-  flex: 0 0 auto;
-  justify-content: flex-end;
-}
-
-.setting-row .language-control > span {
-  display: none;
-}
-
-.setting-row .language-select-button {
-  width: 138px;
-  max-width: 138px;
-}
-
-.setting-row-language {
-  align-items: center;
-  flex-direction: row;
-}
-
-.setting-row-language > div {
-  min-width: 0;
-}
-
 .theme-control {
   flex: 0 0 auto;
   position: relative;
@@ -5245,53 +5122,6 @@ textarea:not(#markdown):focus-visible,
   font-size: 11.5px;
   font-style: normal;
   line-height: 1.35;
-}
-
-.setting-subcontrols {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 8px;
-  align-items: end;
-}
-
-.setting-sound-controls {
-  margin-top: 2px;
-  padding: 11px;
-  border: 1px solid color-mix(in oklch, var(--line), transparent 12%);
-  background: color-mix(in oklch, var(--paper-2), var(--paper) 62%);
-}
-
-.setting-subcontrols label {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-
-.setting-subcontrols label > span {
-  margin: 0;
-  color: var(--muted);
-  font-size: 10.5px;
-  font-weight: 720;
-  line-height: 1.2;
-}
-
-.setting-subcontrols select {
-  width: 100%;
-  min-width: 0;
-}
-
-.setting-subcontrols select {
-  height: 34px;
-  padding: 0 9px;
-  border: 1px solid color-mix(in oklch, var(--line), transparent 8%);
-  background: var(--paper);
-  color: var(--ink);
-  font-weight: 720;
-}
-
-.setting-sound-controls select:disabled {
-  cursor: not-allowed;
-  opacity: 0.52;
 }
 
 .setting-links {
@@ -5496,21 +5326,6 @@ textarea:not(#markdown):focus-visible,
     flex-direction: column;
   }
 
-  .setting-row-language {
-    align-items: center;
-    flex-direction: row;
-  }
-
-  .setting-row-language .language-control {
-    flex: 0 0 auto;
-  }
-
-  .setting-row-language .language-select-button,
-  .setting-row-language .language-options {
-    width: 132px;
-    max-width: 132px;
-  }
-
   .theme-control {
     width: 100%;
   }
@@ -5694,15 +5509,6 @@ textarea:not(#markdown):focus-visible,
 }
 
 @media (pointer: coarse) {
-  .language-select-button {
-    height: 44px;
-    max-width: none;
-  }
-
-  .language-option {
-    min-height: 38px;
-  }
-
   .draft-editor-formatting button,
   .record-edit-toolbar button {
     min-height: 36px;

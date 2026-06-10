@@ -130,23 +130,12 @@
     "copyEvidence",
     "copyEvidencePackage",
     "downloadEvidencePackage",
-    "languageControl",
-    "languageSelect",
-    "languageSelectButton",
-    "languageSelectValue",
-    "languageOptionsList",
     "themeChoice",
     "metadataOptions",
     "importTitleOption",
     "importCoverOption",
     "draftProcessingOptions",
     "smartPunctuationOption",
-    "articleExportOptions",
-    "articleExportOption",
-    "successFeedbackOptions",
-    "confettiOption",
-    "successSoundOption",
-    "successSoundStyle",
     "activityPanel"
   ];
 

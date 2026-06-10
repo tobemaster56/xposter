@@ -1444,15 +1444,13 @@
             summary.markersCleaned += settleResult.markerCleaned;
             upload.settled = !settleResult.missing;
           }
-          if (payload.cover && imageSourcesMatch(upload.source, payload.cover) && !upload.mediaId && !summary.cover.graphql && !summary.cover.skippedReason) {
-            const refreshed = await waitForUploadMediaId(draftNode, upload);
-            draftNode = refreshed.draftNode;
-          }
+          // Only record which uploaded image is the cover here. The cover GraphQL
+          // update is deferred until all body images finish: running it mid-loop
+          // rebuilds the editor content_state and re-keys earlier media blocks, so
+          // the next image's new-media detection matched the re-keyed earlier image
+          // instead of the real new upload — leaving a placeholder behind.
           if (upload.coverOnly && !coverUpload) coverUpload = upload;
-          if (uploadMatchesCover(upload, payload.cover) && !summary.cover.graphql && !summary.cover.skippedReason) {
-            coverUpload = upload;
-            await applyCoverMetadata(payload.cover, articleId, upload, summary);
-          }
+          else if (!coverUpload && uploadMatchesCover(upload, payload.cover)) coverUpload = upload;
         } else {
           summary.imgFail += 1;
           summary.imageErrors.push({
@@ -1481,10 +1479,17 @@
 
       if (payload.cover) {
         throwIfCancelled();
-        if (!summary.cover.graphql && !summary.cover.skippedReason && !articleId) {
+        if (!articleId) {
           summary.cover.skippedReason = "No article id in URL";
           console.warn(LOG, "cover update skipped: no article id");
-        } else if (!summary.cover.graphql && !summary.cover.skippedReason) {
+        } else if (coverUpload && !summary.cover.graphql && !summary.cover.skippedReason) {
+          if (!coverUpload.mediaId) {
+            const refreshed = await waitForUploadMediaId(draftNode, coverUpload);
+            draftNode = refreshed.draftNode || draftNode;
+          }
+          await applyCoverMetadata(payload.cover, articleId, coverUpload, summary);
+        }
+        if (!summary.cover.graphql && !summary.cover.skippedReason) {
           summary.cover.skippedReason = "Cover source was not uploaded; it may have stayed as a Markdown link";
           console.info(LOG, "cover skipped because the source was not uploaded", payload.cover);
         }

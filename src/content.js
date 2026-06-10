@@ -14,17 +14,10 @@
   const IMPORT_BUTTON_ADJACENT_ESTIMATED_WIDTH_PX = 172;
   const IMPORT_BUTTON_ADJACENT_HEIGHT_PX = 52;
   const DROP_HINT_ID = "__xposter_drop_hint__";
-  const ARTICLE_EXPORT_ID = "__xposter_article_export__";
-  const ARTICLE_EXPORT_STYLE_ID = "__xposter_article_export_style__";
-  const SUCCESS_CELEBRATION_ID = "__xposter_success_celebration__";
-  const SUCCESS_CELEBRATION_STYLE_ID = "__xposter_success_celebration_style__";
-  const SUCCESS_CELEBRATION_DURATION_MS = 3200;
-  const SUCCESS_CELEBRATION_PIECE_COUNT = 72;
   const nodeCache = new WeakMap();
   const SIDEPANEL_DRAFT_STORAGE_KEY = "xposter_sidepanel_draft";
   const PENDING_ARTICLE_IMPORT_STORAGE_KEY = "xposter_pending_article_import";
   const IMPORT_OPTIONS_STORAGE_KEY = "xposter_import_options";
-  const ARTICLE_EXPORT_SETTINGS_STORAGE_KEY = "xposter_article_export_settings";
   const LANGUAGE_STORAGE_KEY = "xposter_language";
   const THEME_STORAGE_KEY = "xposter_theme";
   const SIDEPANEL_QUEUE_STORAGE_KEY = "xposter_publish_queue";
@@ -39,13 +32,6 @@
     "Images: {count}/{limit}. Remove {extra} image(s) before writing.";
   const X_ARTICLE_MEDIA_HEADROOM_NOTE =
     "Images: {count}/{limit}. Close to X Article's image limit.";
-  const ARTICLE_EXPORT_MIN_SCORE = 12;
-  const ARTICLE_EXPORT_LONGFORM_SELECTOR = [
-    "[data-testid='twitterArticleReadView']",
-    "[data-testid='twitter-article-title']",
-    "[data-testid='twitterArticleRichTextView']",
-    "[data-testid='longformRichTextComponent']"
-  ].join(",");
   const CONTENT_ZH_TEXT = new Map(Object.entries({
     "xPoster page drop target": "xPoster 页面拖拽目标",
     "Markdown exported": "Markdown 已导出",
@@ -82,18 +68,10 @@
     "Could not read the dropped Markdown file. Try the import button or drop a real .md file.": "无法读取拖入的 Markdown 文件。请试试导入按钮，或拖入真正的 .md 文件。",
     "Opening X Article...": "正在打开 X 文章...",
     "No Markdown content": "没有 Markdown 内容",
-    "No readable article text found.": "未找到可读取的文章正文。",
     "Markdown saved.": "Markdown 已保存。",
     "Markdown copied.": "Markdown 已复制。",
-    "Could not export Markdown": "无法导出 Markdown",
-    "Copy Markdown": "复制 Markdown",
-    "Download Markdown": "下载 Markdown",
-    "Copy MD": "复制 MD",
-    "Download MD": "下载 MD",
     "Export Markdown": "导出 Markdown",
-    "Article title Markdown tools": "文章标题区 Markdown 工具",
     "Markdown": "Markdown",
-    "MD": "MD",
     "Markdown export action": "Markdown 导出操作",
     "Drop Markdown files to add drafts to the side panel.": "拖入 Markdown 文件，将草稿加入侧边栏。",
     "Drop a Markdown file or Markdown text to open it in the side panel.": "拖入 Markdown 文件或 Markdown 文本，在侧边栏打开。",
@@ -211,15 +189,7 @@
     dropHintSurfaceFrame: 0,
     activeRun: null,
     statusTimer: 0,
-    language: "en",
-    articleExport: {
-      enabled: true,
-      mode: "copy",
-      root: null,
-      syncTimer: 0,
-      feedbackTimer: 0,
-      inlineFeedbackTimer: 0
-    }
+    language: "zh"
   };
 
   function runtimeErrorMessage(error) {
@@ -301,30 +271,6 @@
     return location.pathname.match(/\/compose\/articles\/edit\/(\d+)/)?.[1] || null;
   }
 
-  function articleExportPathInfo(url = location.href) {
-    try {
-      const parsed = new URL(url, location.origin);
-      if (!/^(?:x|twitter)\.com$/i.test(parsed.hostname)) return { id: null, readable: false };
-      const segments = parsed.pathname.split("/").filter(Boolean);
-      if (segments[0] === "compose" && segments[1] === "articles") return { id: null, readable: false };
-      const articleIndex = segments.findIndex((segment) => /^(?:article|articles)$/.test(segment));
-      const articleId = articleIndex >= 0 && /^\d+$/.test(segments[articleIndex + 1] || "")
-        ? segments[articleIndex + 1]
-        : null;
-      const statusIndex = segments.findIndex((segment) => segment === "status");
-      const statusId = statusIndex >= 0 && /^\d+$/.test(segments[statusIndex + 1] || "")
-        ? segments[statusIndex + 1]
-        : null;
-      return { id: articleId || statusId || null, readable: Boolean(articleId || statusId) };
-    } catch {
-      return { id: null, readable: false };
-    }
-  }
-
-  function articleExportIdFromUrl(url = location.href) {
-    return articleExportPathInfo(url).id;
-  }
-
   async function collectTargetContext(options = {}) {
     const editor = findEditor();
     const editorText = normalizeText(editor?.innerText || editor?.textContent || "");
@@ -400,23 +346,13 @@
     return String(text || "").replace(/\s+/g, " ").trim();
   }
 
-  function normalizeLanguage(language) {
-    const value = String(language || "").toLowerCase().replace("_", "-");
-    if (value === "auto" || value === "system" || value === "browser") return preferredContentLanguage();
-    if (value === "zh-tw" || value === "zh-hant" || value === "zh-hk") return "zh-TW";
-    if (value.startsWith("zh")) return "zh";
-    if (value.startsWith("en")) return "en";
-    return "en";
+  // Simplified Chinese only.
+  function normalizeLanguage() {
+    return "zh";
   }
 
   function preferredContentLanguage() {
-    const candidates = [navigator.language, ...(Array.isArray(navigator.languages) ? navigator.languages : [])];
-    for (const language of candidates) {
-      const value = String(language || "").toLowerCase().replace("_", "-");
-      if (value === "zh-tw" || value === "zh-hant" || value === "zh-hk") return "zh-TW";
-      if (value.startsWith("zh")) return "zh";
-    }
-    return "en";
+    return "zh";
   }
 
   function isChineseLanguage(language = state.language) {
@@ -431,8 +367,7 @@
     const source = contentSourceText(text);
     if (!isChineseLanguage()) return source;
     const direct = CONTENT_ZH_TEXT.get(source);
-    const translated = direct || translateContentPattern(source);
-    return state.language === "zh-TW" ? shared.toTraditionalChinese(translated) : translated;
+    return direct || translateContentPattern(source);
   }
 
   function translateContentPattern(source) {
@@ -499,21 +434,6 @@
       return source.replace(pattern, replacement);
     }
     return source;
-  }
-
-  function articleExportLabel(mode) {
-    return translateContentText(mode === "download" ? "Download Markdown" : "Copy Markdown");
-  }
-
-  function articleExportShortLabel(mode) {
-    return translateContentText(mode === "download" ? "Download MD" : "Copy MD");
-  }
-
-  function articleExportIconMarkup(mode) {
-    if (normalizeArticleExportMode(mode) === "download") {
-      return '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3v11"/><path d="m7 10 5 5 5-5"/><path d="M5 19h14"/></svg>';
-    }
-    return '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="8" y="8" width="10" height="12" rx="2"/><path d="M6 16H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"/></svg>';
   }
 
   function truncateText(text, maxLength) {
@@ -787,10 +707,6 @@
     showStatus(text, level, timeout);
   }
 
-  function prefersReducedMotion() {
-    return window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches || false;
-  }
-
   function throwIfImportCancelled() {
     if (!state.cancelRequested) return;
     const error = new Error("Writing stopped by user.");
@@ -817,7 +733,6 @@
       setTextContentIfChanged(detail, translateContentText(status.dataset.statusText || contentSourceText(detail.textContent || "")));
       syncStatusButtons(status, level);
     }
-    updateArticleExportButtonMode();
     updateVisibleDropHintCopy();
     syncImportButtonCopy();
   }
@@ -1053,201 +968,8 @@
     document.head.appendChild(style);
   }
 
-  function injectSuccessCelebrationStyle() {
-    if (document.getElementById(SUCCESS_CELEBRATION_STYLE_ID)) return;
-    const style = document.createElement("style");
-    style.id = SUCCESS_CELEBRATION_STYLE_ID;
-    style.textContent = `
-      #${SUCCESS_CELEBRATION_ID} {
-        position: fixed;
-        inset: 0;
-        width: 100vw;
-        height: 100vh;
-        height: 100dvh;
-        z-index: 2147483646;
-        pointer-events: none;
-        overflow: hidden;
-        contain: layout paint style;
-      }
-      #${SUCCESS_CELEBRATION_ID} .__xposter_success_mark {
-        position: absolute;
-        left: 50vw;
-        top: 42vh;
-        top: 42dvh;
-        width: 88px;
-        height: 88px;
-        border: 1px solid rgba(29, 155, 240, 0.28);
-        border-radius: 999px;
-        display: grid;
-        place-items: center;
-        background: rgba(255, 255, 255, 0.92);
-        color: #00ba7c;
-        box-shadow: 0 18px 42px rgba(15, 20, 25, 0.16);
-        transform: translate3d(-50%, -50%, 0) scale(0.92);
-        animation: __xposter_success_mark 1800ms cubic-bezier(0.22, 1, 0.36, 1) both;
-      }
-      #${SUCCESS_CELEBRATION_ID} .__xposter_success_mark svg {
-        width: 38px;
-        height: 38px;
-        fill: currentColor;
-      }
-      #${SUCCESS_CELEBRATION_ID} .__xposter_success_piece {
-        position: absolute;
-        left: var(--__xposter-success-start-x, 50vw);
-        top: var(--__xposter-success-start-y, 50vh);
-        width: var(--__xposter-success-width, 7px);
-        height: var(--__xposter-success-height, 13px);
-        border-radius: var(--__xposter-success-radius, 2px);
-        background: var(--__xposter-success-piece, #1d9bf0);
-        opacity: 0;
-        transform: translate3d(-50%, -50%, 0) rotate(var(--__xposter-success-angle, 0deg));
-        transform-origin: center;
-        will-change: transform, opacity;
-        animation: __xposter_success_piece 2600ms cubic-bezier(0.16, 1, 0.3, 1) both;
-        animation-delay: var(--__xposter-success-delay, 0ms);
-      }
-      @keyframes __xposter_success_mark {
-        0% { opacity: 0; transform: translate3d(-50%, -50%, 0) scale(0.92); }
-        18% { opacity: 1; transform: translate3d(-50%, -50%, 0) scale(1); }
-        72% { opacity: 1; transform: translate3d(-50%, -54%, 0) scale(1); }
-        100% { opacity: 0; transform: translate3d(-50%, -72%, 0) scale(0.98); }
-      }
-      @keyframes __xposter_success_piece {
-        0% {
-          opacity: 0;
-          transform: translate3d(-50%, -50%, 0) rotate(var(--__xposter-success-angle, 0deg)) scale(0.72);
-        }
-        10% { opacity: 1; }
-        72% { opacity: 0.88; }
-        100% {
-          opacity: 0;
-          transform:
-            translate3d(
-              calc(-50% + var(--__xposter-success-x, 0px)),
-              calc(-50% + var(--__xposter-success-y, -120px)),
-              0
-            )
-            rotate(calc(var(--__xposter-success-angle, 0deg) + 120deg))
-            scale(var(--__xposter-success-scale, 0.92));
-        }
-      }
-      @media (prefers-color-scheme: dark) {
-        #${SUCCESS_CELEBRATION_ID} .__xposter_success_mark {
-          background: rgba(22, 24, 28, 0.92);
-          border-color: rgba(102, 169, 216, 0.34);
-          box-shadow: 0 18px 44px rgba(0, 0, 0, 0.34);
-        }
-      }
-      @media (prefers-reduced-motion: reduce) {
-        #${SUCCESS_CELEBRATION_ID} .__xposter_success_mark {
-          opacity: 1;
-          transform: translate3d(-50%, -50%, 0) scale(1);
-          animation: none;
-        }
-        #${SUCCESS_CELEBRATION_ID} .__xposter_success_piece {
-          display: none;
-          animation: none;
-        }
-      }
-    `;
-    document.head.appendChild(style);
-  }
-
-  function showSuccessCelebration({ colors = [] } = {}) {
-    injectSuccessCelebrationStyle();
-    document.getElementById(SUCCESS_CELEBRATION_ID)?.remove();
-    const root = document.createElement("div");
-    root.id = SUCCESS_CELEBRATION_ID;
-    root.setAttribute("aria-hidden", "true");
-    const mark = document.createElement("div");
-    mark.className = "__xposter_success_mark";
-    mark.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.4 16.6 4.8 12l-1.4 1.4 6 6L21 7.8 19.6 6.4 9.4 16.6Z"/></svg>';
-    root.appendChild(mark);
-    if (!prefersReducedMotion()) {
-      const palette = colors.length ? colors : ["#0f1419", "#536471", "#1d9bf0", "#00ba7c", "#cfd9de"];
-      for (let index = 0; index < SUCCESS_CELEBRATION_PIECE_COUNT; index += 1) {
-        const piece = document.createElement("span");
-        const startX = 6 + ((index * 17) % 89);
-        const startY = 6 + ((index * 29) % 82);
-        const driftX = ((index * 37) % 39) - 19;
-        const driftY = ((index * 31) % 55) - 18;
-        const width = 5 + (index % 4);
-        const height = index % 5 === 0 ? width : 10 + (index % 5) * 2;
-        piece.className = "__xposter_success_piece";
-        piece.style.setProperty("--__xposter-success-piece", palette[index % palette.length]);
-        piece.style.setProperty("--__xposter-success-start-x", `${startX}vw`);
-        piece.style.setProperty("--__xposter-success-start-y", `${startY}vh`);
-        piece.style.setProperty("--__xposter-success-x", `${driftX}vw`);
-        piece.style.setProperty("--__xposter-success-y", `${driftY}vh`);
-        piece.style.setProperty("--__xposter-success-width", `${width}px`);
-        piece.style.setProperty("--__xposter-success-height", `${height}px`);
-        piece.style.setProperty("--__xposter-success-radius", index % 5 === 0 ? "999px" : "2px");
-        piece.style.setProperty("--__xposter-success-scale", `${0.72 + (index % 4) * 0.08}`);
-        piece.style.setProperty("--__xposter-success-angle", `${index * 23}deg`);
-        piece.style.setProperty("--__xposter-success-delay", `${(index % 18) * 22}ms`);
-        root.appendChild(piece);
-      }
-    }
-    document.body.appendChild(root);
-    window.setTimeout(() => root.remove(), SUCCESS_CELEBRATION_DURATION_MS);
-  }
-
   function broadcast(payload) {
     safeRuntimeSendMessage({ type: "xposter:event", event: payload.type || "message", payload }).catch(() => {});
-  }
-
-  function normalizeArticleExportMode(mode) {
-    return mode === "download" ? "download" : "copy";
-  }
-
-  function normalizeArticleExportSettings(settings = {}) {
-    return {
-      enabled: settings.enabled !== false,
-      mode: normalizeArticleExportMode(settings.mode),
-      preferredAction: normalizeArticleExportMode(settings.preferredAction || settings.mode)
-    };
-  }
-
-  function articleExportSettingsPayload() {
-    return {
-      enabled: state.articleExport.enabled !== false,
-      mode: normalizeArticleExportMode(state.articleExport.mode),
-      preferredAction: normalizeArticleExportMode(state.articleExport.mode)
-    };
-  }
-
-  function applyArticleExportSettings(settings = {}) {
-    const normalized = normalizeArticleExportSettings(settings);
-    state.articleExport.enabled = normalized.enabled;
-    state.articleExport.mode = normalized.preferredAction;
-    updateArticleExportButtonMode();
-    scheduleArticleExportSync();
-  }
-
-  async function setArticleExportMode(mode) {
-    state.articleExport.mode = normalizeArticleExportMode(mode);
-    updateArticleExportButtonMode();
-    if (chrome.storage?.local) {
-      await chrome.storage.local.set({
-        [ARTICLE_EXPORT_SETTINGS_STORAGE_KEY]: articleExportSettingsPayload()
-      }).catch(() => {});
-    }
-  }
-
-  async function restoreArticleExportSettings() {
-    if (!chrome.storage?.local) {
-      applyArticleExportSettings();
-      return;
-    }
-    const stored = await chrome.storage.local.get(ARTICLE_EXPORT_SETTINGS_STORAGE_KEY).catch(() => ({}));
-    applyArticleExportSettings(stored[ARTICLE_EXPORT_SETTINGS_STORAGE_KEY] || {});
-  }
-
-  function installArticleExportSettingsSync() {
-    chrome.storage?.onChanged?.addListener((changes, areaName) => {
-      if (areaName !== "local" || !changes[ARTICLE_EXPORT_SETTINGS_STORAGE_KEY]) return;
-      applyArticleExportSettings(changes[ARTICLE_EXPORT_SETTINGS_STORAGE_KEY].newValue || {});
-    });
   }
 
   function waitForMainReady(timeoutMs = 5000) {
@@ -1296,7 +1018,6 @@
     const segments = Array.isArray(parsed?.segments) ? parsed.segments : [];
     const coverSource = options.setCover === false ? "" : String(parsed?.cover || "").trim();
     let bodyImages = 0;
-    let tables = 0;
     let coverInBody = false;
     for (const segment of segments) {
       if (segment.type === "image") {
@@ -1304,15 +1025,12 @@
         if (coverSource && !coverInBody && shared.imageSourcesMatch(segment.source, coverSource)) {
           coverInBody = true;
         }
-      } else if (segment.type === "table") {
-        tables += 1;
       }
     }
     const coverOnly = coverSource && !coverInBody ? 1 : 0;
-    const total = bodyImages + tables + coverOnly;
+    const total = bodyImages + coverOnly;
     return {
       bodyImages,
-      tables,
       coverOnly,
       total,
       nearSoftLimit: total >= X_ARTICLE_MEDIA_HEADROOM_THRESHOLD && total <= X_ARTICLE_MEDIA_SOFT_LIMIT,
@@ -1486,12 +1204,9 @@
         ? await loadImageWithRetry(coverSegment.source, "cover")
         : null;
       throwIfImportCancelled();
-      const tableMap = await prepareTables(segments);
-      throwIfImportCancelled();
       const mediaFailures = collectMediaFailures(imageMap, "image")
-        .concat(coverResult && !coverResult.ok ? collectMediaFailures(new Map([[coverSegment, coverResult]]), "cover") : [])
-        .concat(collectMediaFailures(tableMap, "table"));
-      const pastePlan = shared.buildPastePlan(segments, imageMap, tableMap, {
+        .concat(coverResult && !coverResult.ok ? collectMediaFailures(new Map([[coverSegment, coverResult]]), "cover") : []);
+      const pastePlan = shared.buildPastePlan(segments, imageMap, new Map(), {
         coverSource,
         coverResult
       });
@@ -1512,7 +1227,6 @@
         counts,
         dropped,
         images: summarizeMap(imageMap),
-        tables: summarizeMap(tableMap),
         mediaWarnings: summarizeMediaWarnings(mediaFailures),
         mediaFailures,
         main: mainSummary,
@@ -1910,26 +1624,6 @@
     } catch (error) {
       return { ok: false, error: error?.message || String(error), source };
     }
-  }
-
-  async function prepareTables(segments) {
-    const tables = segments.filter((segment) => segment.type === "table");
-    const map = new Map();
-    if (!tables.length) return map;
-    showStatus(`Rendering ${tables.length} table(s)...`, "work");
-    await Promise.all(
-      tables.map(async (segment, index) => {
-        try {
-          throwIfImportCancelled();
-          map.set(segment, await shared.renderTableImage(segment, `table-${index + 1}.png`));
-          throwIfImportCancelled();
-        } catch (error) {
-          if (error?.cancelled) throw error;
-          map.set(segment, { ok: false, error: error?.message || String(error) });
-        }
-      })
-    );
-    return map;
   }
 
   function summarizeMap(map) {
@@ -2610,877 +2304,6 @@
     if (!frame) return;
     if (typeof window.cancelAnimationFrame === "function") window.cancelAnimationFrame(frame);
     else window.clearTimeout(frame);
-  }
-
-  function isArticleExportRoute() {
-    return !isArticleRoute() && (
-      articleExportPathInfo().readable ||
-      Boolean(document.querySelector(ARTICLE_EXPORT_LONGFORM_SELECTOR))
-    );
-  }
-
-  function scheduleArticleExportSync(delay = 160) {
-    window.clearTimeout(state.articleExport.syncTimer);
-    state.articleExport.syncTimer = window.setTimeout(syncArticleExportButton, delay);
-  }
-
-  function scheduleArticleExportSyncFromMutations(mutations) {
-    if (shouldScheduleArticleExportSync(mutations)) scheduleArticleExportSync();
-  }
-
-  function shouldScheduleArticleExportSync(mutations = []) {
-    if (!state.articleExport.enabled) return false;
-    if (document.getElementById(ARTICLE_EXPORT_ID)) return true;
-    if (articleExportPathInfo().readable) return true;
-    return mutations.some((mutation) =>
-      mutationTouchesArticleExportSignal(mutation.addedNodes) ||
-      mutationTouchesArticleExportSignal(mutation.removedNodes)
-    );
-  }
-
-  function mutationTouchesArticleExportSignal(nodes) {
-    for (const node of nodes || []) {
-      if (nodeHasArticleExportSignal(node)) return true;
-    }
-    return false;
-  }
-
-  function nodeHasArticleExportSignal(node) {
-    if (!node || node.id === ARTICLE_EXPORT_ID) return false;
-    if (node.nodeType === 1 && node.matches?.(ARTICLE_EXPORT_LONGFORM_SELECTOR)) return true;
-    return Boolean(node.querySelector?.(ARTICLE_EXPORT_LONGFORM_SELECTOR));
-  }
-
-  function installArticleExportButton() {
-    injectArticleExportStyles();
-    restoreArticleExportSettings().catch(() => applyArticleExportSettings());
-    installArticleExportSettingsSync();
-    const observer = new MutationObserver(scheduleArticleExportSyncFromMutations);
-    observer.observe(document.body, { childList: true, subtree: true });
-    window.addEventListener("popstate", () => scheduleArticleExportSync(260));
-    window.addEventListener("resize", () => scheduleArticleExportSync(260), { passive: true });
-    scheduleArticleExportSync(500);
-  }
-
-  function syncArticleExportButton() {
-    if (!state.articleExport.enabled || !isArticleExportRoute()) {
-      removeArticleExportButton();
-      return;
-    }
-    const article = extractReadableXArticle();
-    if (!article) {
-      removeArticleExportButton();
-      return;
-    }
-    const root = ensureArticleExportRoot();
-    if (!root) return;
-    setDatasetValueIfChanged(root, "articleTitle", article.title || "");
-    setDatasetValueIfChanged(root, "articleMarkdown", article.markdown);
-    setDatasetValueIfChanged(root, "articleFileName", article.fileName || articleFileName(article.title));
-    setDatasetValueIfChanged(root, "articleCharacterCount", article.characterCount || 0);
-    setDatasetValueIfChanged(root, "articleImageCount", article.imageCount || 0);
-    setDatasetValueIfChanged(root, "mode", normalizeArticleExportMode(state.articleExport.mode));
-    placeArticleExportRoot(root, article);
-    updateArticleExportButtonMode();
-  }
-
-  function removeArticleExportButton() {
-    state.articleExport.root = null;
-    document.getElementById(ARTICLE_EXPORT_ID)?.remove();
-  }
-
-  function ensureArticleExportRoot() {
-    if (!document.body) return null;
-    let root = document.getElementById(ARTICLE_EXPORT_ID);
-    if (!root) {
-      root = document.createElement("span");
-      root.id = ARTICLE_EXPORT_ID;
-      root.dataset.motion = "entered";
-      root.setAttribute("role", "group");
-      root.setAttribute("aria-label", translateContentText("Article title Markdown tools"));
-      root.innerHTML = `
-        <span class="__xposter_article_export_mark" aria-hidden="true">${translateContentText("MD")}</span>
-        <span class="__xposter_article_export_actions">
-          <button class="__xposter_article_export_action" type="button" data-export-action="copy" data-export-icon="copy"></button>
-          <button class="__xposter_article_export_action" type="button" data-export-action="download" data-export-icon="download"></button>
-        </span>
-        <span class="__xposter_article_export_feedback" aria-live="polite"></span>
-      `;
-      root.addEventListener("click", handleArticleExportActionClick);
-      window.setTimeout(() => {
-        if (root.isConnected && root.dataset.motion === "entered") delete root.dataset.motion;
-      }, 320);
-    }
-    state.articleExport.root = root;
-    return root;
-  }
-
-  function updateArticleExportButtonMode() {
-    const root = document.getElementById(ARTICLE_EXPORT_ID);
-    if (!root) return;
-    setAttributeValueIfChanged(root, "aria-label", translateContentText("Article title Markdown tools"));
-    const mode = normalizeArticleExportMode(state.articleExport.mode);
-    setDatasetValueIfChanged(root, "mode", mode);
-    const { mark, buttons } = articleExportNodes(root);
-    setTextContentIfChanged(mark, translateContentText("MD"));
-    buttons.forEach((button) => {
-      const buttonMode = normalizeArticleExportMode(button.dataset.exportAction);
-      const title = articleExportLabel(buttonMode);
-      removeDatasetValueIfChanged(button, "active");
-      setSourceHtmlIfChanged(button, articleExportIconMarkup(buttonMode));
-      setAttributeValueIfChanged(button, "title", title);
-      setAttributeValueIfChanged(button, "aria-label", title);
-    });
-  }
-
-  function articleExportNodes(root) {
-    if (!root) return { mark: null, buttons: [], feedback: null };
-    return cachedElementNodes(
-      root,
-      "articleExport",
-      (container) => ({
-        mark: container.querySelector(".__xposter_article_export_mark"),
-        buttons: Array.from(container.querySelectorAll("[data-export-action]")),
-        feedback: container.querySelector(".__xposter_article_export_feedback")
-      }),
-      (nodes) => nodes.mark?.isConnected && nodes.feedback?.isConnected && nodes.buttons?.every((button) => button.isConnected)
-    );
-  }
-
-  async function handleArticleExportActionClick(event) {
-    const button = event.target.closest("[data-export-action]");
-    if (!button) return;
-    event.preventDefault();
-    event.stopPropagation();
-    await handleArticleExportAction(button.dataset.exportAction);
-  }
-
-  async function handleArticleExportAction(action) {
-    const root = document.getElementById(ARTICLE_EXPORT_ID);
-    const article = articleExportPayload(root);
-    const mode = normalizeArticleExportMode(action || state.articleExport.mode);
-    await setArticleExportMode(mode);
-    if (!article.markdown) {
-      signalArticleExportFeedback(root, "warn");
-      transientStatus("No readable article text found.", "warn", 3500);
-      return;
-    }
-    try {
-      if (mode === "download") {
-        downloadMarkdown(article.markdown, article.fileName);
-        notifyArticleExportSuccess(root, "download", article);
-      } else {
-        await copyText(article.markdown);
-        notifyArticleExportSuccess(root, "copy", article);
-      }
-      signalArticleExportFeedback(root, "done");
-    } catch (error) {
-      signalArticleExportFeedback(root, "error");
-      transientStatus(error?.message || "Could not export Markdown", "error", 5000);
-    }
-  }
-
-  function articleExportPayload(root) {
-    return {
-      markdown: String(root?.dataset.articleMarkdown || ""),
-      fileName: root?.dataset.articleFileName || articleFileName(root?.dataset.articleTitle || ""),
-      characterCount: Number(root?.dataset.articleCharacterCount || 0) || markdownCharacterCount(root?.dataset.articleMarkdown || ""),
-      imageCount: Number(root?.dataset.articleImageCount || 0) || markdownImageCount(root?.dataset.articleMarkdown || "")
-    };
-  }
-
-  async function copyText(text) {
-    if (!navigator.clipboard?.writeText) throw new Error("Clipboard is not available.");
-    await navigator.clipboard.writeText(text);
-  }
-
-  function downloadMarkdown(markdown, fileName) {
-    const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = fileName || articleFileName("");
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1200);
-  }
-
-  function notifyArticleExportSuccess(root, mode, article) {
-    const message = articleExportSuccessText(mode, article);
-    setArticleExportInlineFeedback(root, message, "done");
-    transientStatus(message, "export", 4200);
-  }
-
-  function articleExportSuccessText(mode, article) {
-    const fileName = article.fileName || articleFileName("");
-    const characters = formatContentNumber(article.characterCount || markdownCharacterCount(article.markdown));
-    const images = formatContentNumber(article.imageCount || markdownImageCount(article.markdown));
-    if (isChineseLanguage()) {
-      return `${mode === "download" ? "已下载" : "已复制"} ${fileName}，${characters} 个字符，${images} 张图片。`;
-    }
-    return `${mode === "download" ? "Downloaded" : "Copied"} ${fileName}, ${characters} characters, ${images} images.`;
-  }
-
-  function formatContentNumber(value) {
-    const number = Number(value);
-    return Number.isFinite(number) ? number.toLocaleString(isChineseLanguage() ? "zh-CN" : "en-US") : "0";
-  }
-
-  function setArticleExportInlineFeedback(root, message, tone = "done", timeout = 4200) {
-    if (!root) return;
-    const { feedback } = articleExportNodes(root);
-    if (!feedback) return;
-    window.clearTimeout(state.articleExport.inlineFeedbackTimer);
-    setTextContentIfChanged(feedback, message);
-    setBooleanPropertyIfChanged(feedback, "hidden", false);
-    setDatasetValueIfChanged(root, "inlineFeedback", tone);
-    state.articleExport.inlineFeedbackTimer = window.setTimeout(() => {
-      if (!root.isConnected || root.dataset.inlineFeedback !== tone) return;
-      setBooleanPropertyIfChanged(feedback, "hidden", true);
-      setTextContentIfChanged(feedback, "");
-      removeDatasetValueIfChanged(root, "inlineFeedback");
-    }, timeout);
-  }
-
-  function markdownCharacterCount(markdown) {
-    return normalizeText(String(markdown || "")
-      .replace(/!\[[^\]]*]\([^)]*\)/g, " ")
-      .replace(/\[([^\]]+)]\([^)]*\)/g, "$1")
-      .replace(/^#{1,6}\s+/gm, "")
-      .replace(/^>\s?/gm, "")
-      .replace(/[`*_~\\]/g, "")
-      .replace(/^-{3,}$/gm, " "))
-      .length;
-  }
-
-  function markdownImageCount(markdown) {
-    return (String(markdown || "").match(/!\[[^\]]*]\([^)]*\)/g) || []).length;
-  }
-
-  function placeArticleExportRoot(root, article) {
-    const anchor = article?.titleNode || articleTitleAnchor(article?.container);
-    if (anchor?.parentElement) {
-      if (root.parentElement !== anchor) anchor.appendChild(root);
-      setDatasetValueIfChanged(root, "placement", "inline");
-      removeStylePropertyIfChanged(root, "--__xposter-article-export-inline-end");
-      return;
-    }
-    if (root.parentElement !== document.body) document.body.appendChild(root);
-    setDatasetValueIfChanged(root, "placement", "fixed");
-    setStylePropertyIfChanged(root, "--__xposter-article-export-inline-end", `${articleDockInlineEnd(article?.container)}px`);
-  }
-
-  function articleTitleAnchor(container) {
-    return detectArticleExportTitleNode(container) ||
-      Array.from(container?.querySelectorAll?.("h1, h2, [role='heading'], [data-testid='twitter-article-title']") || [])
-        .find((node) => normalizeText(node.innerText || node.textContent || ""));
-  }
-
-  function signalArticleExportFeedback(root, tone = "done") {
-    if (!root) return;
-    window.clearTimeout(state.articleExport.feedbackTimer);
-    removeDatasetValueIfChanged(root, "feedback");
-    void root.offsetWidth;
-    setDatasetValueIfChanged(root, "feedback", tone);
-    state.articleExport.feedbackTimer = window.setTimeout(() => {
-      if (root.isConnected && root.dataset.feedback === tone) removeDatasetValueIfChanged(root, "feedback");
-    }, 900);
-  }
-
-  function extractReadableXArticle() {
-    if (!hasReadableArticleSignal()) return null;
-    const longformRoots = Array.from(document.querySelectorAll(ARTICLE_EXPORT_LONGFORM_SELECTOR));
-    const articleAnchorSelector = articleExportAnchorSelector();
-    const articleRoots = articleAnchorSelector
-      ? Array.from(document.querySelectorAll(articleAnchorSelector))
-      : [];
-    const candidates = Array.from(new Set(
-      longformRoots
-        .concat(articleRoots)
-        .flatMap((node) => [node.closest("article"), node].filter(Boolean))
-    ));
-    return candidates
-      .map(articleExportCandidate)
-      .filter(Boolean)
-      .reduce((best, candidate) => {
-        const score = scoreArticleExportCandidate(candidate);
-        if (score < ARTICLE_EXPORT_MIN_SCORE || score <= (best?.score || 0)) return best;
-        return { score, article: candidate };
-      }, null)?.article || null;
-  }
-
-  function articleExportCandidate(element) {
-    const container = articleExportContainer(element);
-    if (!container || container.closest(`#${ARTICLE_EXPORT_ID}`)) return null;
-    if (!containerHasReadableArticleSignal(container)) return null;
-    const titleNode = detectArticleExportTitleNode(container);
-    const parts = removeDuplicateArticleTitleParts(
-      articleMarkdownParts(container, { titleNode }),
-      detectArticleExportTitle(container, [], titleNode)
-    );
-    const title = detectArticleExportTitle(container, parts, titleNode);
-    const markdown = normalizeMarkdownLines([
-      title ? `# ${escapeMarkdownInline(title)}` : "",
-      ...removeDuplicateArticleTitleParts(parts, title)
-    ]);
-    const textLength = normalizeText(markdown).length;
-    if (textLength < 180 && parts.length < 3) return null;
-    return {
-      container,
-      titleNode,
-      title,
-      markdown,
-      parts,
-      textLength,
-      fileName: articleFileName(title),
-      characterCount: markdownCharacterCount(markdown),
-      imageCount: markdownImageCount(markdown),
-      linkCount: (markdown.match(/\]\(https?:\/\//g) || []).length
-    };
-  }
-
-  function hasReadableArticleSignal() {
-    return Boolean(document.querySelector(ARTICLE_EXPORT_LONGFORM_SELECTOR) || articleExportMediaLinks().length);
-  }
-
-  function containerHasReadableArticleSignal(container) {
-    return Boolean(
-      container?.matches?.(ARTICLE_EXPORT_LONGFORM_SELECTOR) ||
-      container?.querySelector?.(ARTICLE_EXPORT_LONGFORM_SELECTOR) ||
-      articleExportMediaLinks(container).length
-    );
-  }
-
-  function articleExportMediaLinks(root = document) {
-    const id = articleExportIdFromUrl();
-    if (!id) return [];
-    return Array.from(root.querySelectorAll(articleExportAnchorSelector(id)))
-      .filter((link) => {
-        try {
-          const url = new URL(link.getAttribute("href") || link.href || "", location.origin);
-          return articleExportPathMatches(url.pathname, id);
-        } catch {
-          return false;
-        }
-      });
-  }
-
-  function articleExportAnchorSelector(id = articleExportIdFromUrl()) {
-    if (!id) return "";
-    return [`a[href*="/article/${id}"]`, `a[href*="/articles/${id}"]`].join(",");
-  }
-
-  function articleExportPathMatches(pathname, id) {
-    if (!id) return false;
-    return [`/article/${id}`, `/articles/${id}`].some((path) =>
-      pathname.includes(path) && (pathname.endsWith(path) || pathname.includes(`${path}/media/`))
-    );
-  }
-
-  function articleExportContainer(element) {
-    const article = element?.closest?.("article") || null;
-    const longform = element?.closest?.(ARTICLE_EXPORT_LONGFORM_SELECTOR) || null;
-    if (!article && !longform) return null;
-    const boundary = article || longform;
-    let best = boundary;
-    for (let node = element; node && node !== document.body; node = node.parentElement) {
-      if (!node.matches?.("article, main article, [data-testid='cellInnerDiv'], section, div")) continue;
-      const rect = node.getBoundingClientRect?.();
-      if (!rect || rect.width < 320 || rect.height < 160) continue;
-      const textLength = normalizeText(node.innerText || node.textContent || "").length;
-      const currentLength = normalizeText(best.innerText || best.textContent || "").length;
-      if (textLength >= currentLength && textLength <= 28000) best = node;
-      if (node === boundary || node.matches?.("article")) break;
-    }
-    return best;
-  }
-
-  function articleDockInlineEnd(container) {
-    const fallback = 24;
-    const rect = container?.getBoundingClientRect?.();
-    if (!rect || rect.width < 320) return fallback;
-    const space = Math.max(12, Math.round(window.innerWidth - Math.min(window.innerWidth - 12, rect.right)));
-    return Math.min(Math.max(space, 16), 420);
-  }
-
-  function scoreArticleExportCandidate(candidate) {
-    return candidate.textLength / 80 +
-      candidate.parts.length * 2 +
-      candidate.imageCount * 2 +
-      candidate.linkCount +
-      (candidate.title ? 8 : 0);
-  }
-
-  function detectArticleExportTitleNode(container) {
-    const xTitle = container?.querySelector?.("[data-testid='twitter-article-title']");
-    if (isReadableArticleTitleNode(xTitle)) return xTitle;
-    return Array.from(container?.querySelectorAll?.("h1, h2, [role='heading']") || [])
-      .find(isReadableArticleTitleNode) || null;
-  }
-
-  function isReadableArticleTitleNode(node) {
-    if (!node) return false;
-    if (node.closest?.(`#${ARTICLE_EXPORT_ID}, [role='button'], button, nav, time`)) return false;
-    const text = normalizeText(articleNodeReadableText(node));
-    if (!text || /^post$|^article$/i.test(text)) return false;
-    const rect = node.getBoundingClientRect?.();
-    return !rect || (rect.width >= 32 && rect.height >= 12);
-  }
-
-  function detectArticleExportTitle(container, parts = [], titleNode = null) {
-    const heading = normalizeText(articleNodeReadableText(titleNode));
-    if (heading && !/^post$|^article$/i.test(heading)) return heading;
-    const first = normalizeText(parts.find((part) => part && !part.startsWith("![")) || "");
-    if (first && first.length <= 140) return first.replace(/^#+\s*/, "");
-    const title = normalizeText(document.title || "").replace(/\s*[\|/].*$/, "").replace(/\s+on X$/, "");
-    return title && !/^x$/i.test(title) ? title : "";
-  }
-
-  function removeDuplicateArticleTitleParts(parts = [], title = "") {
-    if (!title) return parts;
-    return parts.filter((part) => !articleMarkdownPartMatchesTitle(part, title));
-  }
-
-  function articleMarkdownPartMatchesTitle(part, title) {
-    return normalizedArticleTitleText(part) === normalizedArticleTitleText(title);
-  }
-
-  function normalizedArticleTitleText(value) {
-    return normalizeText(String(value || "")
-      .replace(/^#{1,6}\s+/, "")
-      .replace(/^\[([^\]]+)]\([^)]+\)$/, "$1")
-      .replace(/\\([\\`*_[\]])/g, "$1")
-      .replace(/[`*_]/g, ""))
-      .toLowerCase();
-  }
-
-  function articleMarkdownParts(root, { titleNode = null } = {}) {
-    const parts = [];
-    const seen = new Set();
-    const selector = "h1, h2, h3, h4, h5, h6, p, blockquote, pre, ul, ol, img, figcaption, [data-testid='tweetText'], div[lang]";
-    const nodes = [
-      ...(root.matches?.(selector) ? [root] : []),
-      ...Array.from(root.querySelectorAll(selector))
-    ];
-    for (const node of nodes) {
-      if (node.closest?.(`#${ARTICLE_EXPORT_ID}, [role='button'], button, nav, time, [aria-label*='analytics' i]`)) continue;
-      if (titleNode && (node === titleNode || titleNode.contains(node))) continue;
-      if (nodes.some((other) => other !== node && other.contains(node) && markdownNodeConsumesChildren(other, titleNode))) continue;
-      if (titleNode && node.contains?.(titleNode)) continue;
-      const part = markdownForArticleNode(node);
-      const key = normalizeText(part);
-      if (!part || !key || seen.has(key)) continue;
-      seen.add(key);
-      parts.push(part);
-    }
-    return parts;
-  }
-
-  function markdownNodeConsumesChildren(node, skippedNode = null) {
-    if (skippedNode && node.contains?.(skippedNode)) return false;
-    const tag = node.tagName?.toLowerCase() || "";
-    return tag === "blockquote" || tag === "pre" || tag === "ul" || tag === "ol" || node.matches?.("[data-testid='tweetText'], div[lang]");
-  }
-
-  function markdownForArticleNode(node) {
-    const tag = node.tagName?.toLowerCase() || "";
-    if (/^h[1-6]$/.test(tag)) return `${"#".repeat(Number(tag[1]))} ${inlineMarkdown(node)}`;
-    if (tag === "blockquote") return inlineMarkdown(node).split(/\n+/).map((line) => `> ${line}`).join("\n");
-    if (tag === "pre") return fencedMarkdown(node.innerText || node.textContent || "");
-    if (tag === "img") return imageMarkdown(node);
-    if (tag === "ul" || tag === "ol") return listMarkdown(node, tag === "ol");
-    if (tag === "p" || tag === "figcaption" || node.matches?.("[data-testid='tweetText'], div[lang]")) {
-      return inlineMarkdown(node);
-    }
-    if (node.children?.length) return "";
-    return "";
-  }
-
-  function listMarkdown(list, ordered = false) {
-    return Array.from(list.children || [])
-      .filter((child) => child.tagName?.toLowerCase() === "li")
-      .map((child, index) => `${ordered ? `${index + 1}.` : "-"} ${inlineMarkdown(child)}`)
-      .join("\n");
-  }
-
-  function fencedMarkdown(text) {
-    const body = String(text || "").replace(/\n{3,}/g, "\n\n").trim();
-    return body ? `\`\`\`\n${body}\n\`\`\`` : "";
-  }
-
-  function imageMarkdown(image) {
-    const src = image.currentSrc || image.src || image.getAttribute("src") || "";
-    if (!src || /^data:/i.test(src)) return "";
-    if (/profile_images|emoji|avatar/i.test(src)) return "";
-    const alt = normalizeText(image.alt || image.getAttribute("aria-label") || "image");
-    return `![${escapeMarkdownAlt(alt || "image")}](${src})`;
-  }
-
-  function inlineMarkdown(root) {
-    const output = [];
-    const walk = (node) => {
-      if (node.nodeType === Node.TEXT_NODE) {
-        output.push(escapeMarkdownInline(node.textContent || ""));
-        return;
-      }
-      if (node.nodeType !== Node.ELEMENT_NODE) return;
-      if (node.closest?.(`#${ARTICLE_EXPORT_ID}`)) return;
-      if (node.id === ARTICLE_EXPORT_ID) return;
-      const tag = node.tagName?.toLowerCase() || "";
-      if (tag === "br") {
-        output.push("\n");
-        return;
-      }
-      if (tag === "img") {
-        const markdown = imageMarkdown(node);
-        if (markdown) output.push(markdown);
-        return;
-      }
-      if (tag === "a") {
-        const linkParts = [];
-        const capture = (child) => {
-          const before = output.length;
-          walk(child);
-          linkParts.push(output.splice(before).join(""));
-        };
-        node.childNodes.forEach(capture);
-        const text = normalizeMarkdownWhitespace(linkParts.join("")) || escapeMarkdownInline(normalizeText(node.textContent || ""));
-        const href = cleanArticleHref(node.getAttribute("href") || node.href || "");
-        output.push(href ? `[${text || href}](${href})` : text);
-        return;
-      }
-      if (tag === "strong" || tag === "b") {
-        output.push("**");
-        node.childNodes.forEach(walk);
-        output.push("**");
-        return;
-      }
-      if (tag === "em" || tag === "i") {
-        output.push("*");
-        node.childNodes.forEach(walk);
-        output.push("*");
-        return;
-      }
-      if (tag === "code") {
-        output.push(`\`${normalizeText(node.textContent || "").replace(/`/g, "\\`")}\``);
-        return;
-      }
-      node.childNodes.forEach(walk);
-    };
-    root.childNodes.forEach(walk);
-    return normalizeMarkdownWhitespace(output.join(""));
-  }
-
-  function articleNodeReadableText(node) {
-    if (!node) return "";
-    const clone = node.cloneNode?.(true);
-    clone?.querySelector?.(`#${ARTICLE_EXPORT_ID}`)?.remove();
-    return clone?.innerText || clone?.textContent || node.innerText || node.textContent || "";
-  }
-
-  function cleanArticleHref(href) {
-    const raw = String(href || "").trim();
-    if (!raw || raw === "#") return "";
-    try {
-      const url = new URL(raw, location.origin);
-      if (url.hostname === location.hostname && url.pathname === location.pathname) return "";
-      return url.href;
-    } catch {
-      return raw;
-    }
-  }
-
-  function normalizeMarkdownWhitespace(value) {
-    return String(value || "")
-      .replace(/[ \t]*\n[ \t]*/g, "\n")
-      .replace(/[ \t]{2,}/g, " ")
-      .replace(/\n{3,}/g, "\n\n")
-      .trim();
-  }
-
-  function normalizeMarkdownLines(lines) {
-    return lines
-      .map(normalizeMarkdownWhitespace)
-      .filter(Boolean)
-      .join("\n\n")
-      .replace(/\n{3,}/g, "\n\n")
-      .trim()
-      .concat("\n");
-  }
-
-  function escapeMarkdownInline(text) {
-    return String(text || "")
-      .replace(/\\/g, "\\\\")
-      .replace(/([`*_\[\]])/g, "\\$1")
-      .replace(/\s+/g, " ");
-  }
-
-  function escapeMarkdownAlt(text) {
-    return String(text || "").replace(/\\/g, "\\\\").replace(/]/g, "\\]").trim();
-  }
-
-  function articleFileName(title) {
-    const fallback = articleExportIdFromUrl() ? `x-article-${articleExportIdFromUrl()}` : "x-article";
-    const base = String(title || fallback)
-      .normalize("NFKD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[\\/:*?"<>|]+/g, "")
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 96);
-    return `${base || fallback}.md`;
-  }
-
-  function injectArticleExportStyles() {
-    if (document.getElementById(ARTICLE_EXPORT_STYLE_ID)) return;
-    const style = document.createElement("style");
-    style.id = ARTICLE_EXPORT_STYLE_ID;
-    style.textContent = `
-      #${ARTICLE_EXPORT_ID} {
-        --__xposter-export-paper: #ffffff;
-        --__xposter-export-paper-2: #f7f9f9;
-        --__xposter-export-ink: #0f1419;
-        --__xposter-export-muted: #536471;
-        --__xposter-export-line: #cfd9de;
-        --__xposter-export-signal: #1d9bf0;
-        --__xposter-export-ok: #00ba7c;
-        --__xposter-export-danger: #f4212e;
-        position: static;
-        z-index: auto;
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-        width: fit-content;
-        max-width: min(100%, 540px);
-        margin: 0 0 0 12px;
-        vertical-align: middle;
-        color: var(--__xposter-export-ink);
-        transform: translateZ(0);
-        font: 12px/1 ui-sans-serif, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif;
-        letter-spacing: 0;
-      }
-      #${ARTICLE_EXPORT_ID}[data-placement="fixed"] {
-        position: fixed;
-        right: var(--__xposter-article-export-inline-end, 24px);
-        bottom: 24px;
-        z-index: 2147483645;
-        max-width: min(320px, calc(100vw - 24px));
-        margin: 0;
-        opacity: 0.84;
-        transform-origin: 100% 100%;
-      }
-      #${ARTICLE_EXPORT_ID}[data-motion="entered"] {
-        animation: __xposter_article_export_in 260ms cubic-bezier(0.22, 1, 0.36, 1);
-      }
-      #${ARTICLE_EXPORT_ID}[data-feedback="done"],
-      #${ARTICLE_EXPORT_ID}[data-feedback="mode"] {
-        animation: __xposter_article_export_confirm 420ms cubic-bezier(0.22, 1, 0.36, 1);
-      }
-      #${ARTICLE_EXPORT_ID}[data-feedback="warn"],
-      #${ARTICLE_EXPORT_ID}[data-feedback="error"] {
-        animation: __xposter_article_export_confirm 420ms cubic-bezier(0.22, 1, 0.36, 1);
-      }
-      #${ARTICLE_EXPORT_ID} .__xposter_article_export_actions {
-        display: inline-flex;
-        align-items: center;
-        gap: 2px;
-        min-height: 24px;
-        max-width: 0;
-        overflow: hidden;
-        opacity: 0;
-        transform: translate3d(-2px, 0, 0);
-        transition:
-          max-width 140ms cubic-bezier(0.25, 1, 0.5, 1),
-          opacity 140ms cubic-bezier(0.25, 1, 0.5, 1),
-          transform 140ms cubic-bezier(0.25, 1, 0.5, 1);
-      }
-      #${ARTICLE_EXPORT_ID}:hover .__xposter_article_export_actions,
-      #${ARTICLE_EXPORT_ID}:focus-within .__xposter_article_export_actions,
-      #${ARTICLE_EXPORT_ID}[data-inline-feedback] .__xposter_article_export_actions,
-      #${ARTICLE_EXPORT_ID}[data-placement="fixed"] .__xposter_article_export_actions {
-        max-width: 54px;
-        opacity: 1;
-        transform: translate3d(0, 0, 0);
-      }
-      #${ARTICLE_EXPORT_ID} .__xposter_article_export_mark {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        min-width: 25px;
-        height: 22px;
-        padding: 0 7px;
-        border: 1px solid transparent;
-        border-radius: 999px;
-        color: color-mix(in oklch, var(--__xposter-export-muted), var(--__xposter-export-ink) 18%);
-        background: color-mix(in oklch, var(--__xposter-export-paper-2), transparent 30%);
-        font-size: 11px;
-        font-weight: 800;
-        line-height: 1;
-        font-variant-numeric: tabular-nums;
-      }
-      #${ARTICLE_EXPORT_ID} button {
-        -webkit-appearance: none;
-        appearance: none;
-        display: inline-grid;
-        place-items: center;
-        width: 24px;
-        height: 24px;
-        min-height: 24px;
-        padding: 0;
-        border: 1px solid transparent;
-        border-radius: 999px;
-        background: transparent;
-        color: var(--__xposter-export-muted);
-        font: inherit;
-        font-weight: 700;
-        cursor: pointer;
-        white-space: nowrap;
-        transition:
-          border-color 140ms cubic-bezier(0.25, 1, 0.5, 1),
-          background-color 140ms cubic-bezier(0.25, 1, 0.5, 1),
-          color 140ms cubic-bezier(0.25, 1, 0.5, 1),
-          transform 140ms cubic-bezier(0.25, 1, 0.5, 1);
-      }
-      #${ARTICLE_EXPORT_ID} button svg {
-        width: 14px;
-        height: 14px;
-        fill: none;
-        stroke: currentColor;
-        stroke-width: 2;
-        stroke-linecap: round;
-        stroke-linejoin: round;
-        pointer-events: none;
-      }
-      #${ARTICLE_EXPORT_ID} button:hover,
-      #${ARTICLE_EXPORT_ID} button:focus-visible {
-        outline: none;
-        border-color: color-mix(in oklch, var(--__xposter-export-signal), var(--__xposter-export-line) 48%);
-        background: color-mix(in oklch, var(--__xposter-export-signal), var(--__xposter-export-paper) 94%);
-        color: var(--__xposter-export-ink);
-        transform: translateY(-1px);
-      }
-      #${ARTICLE_EXPORT_ID} button:focus-visible {
-        box-shadow: 0 0 0 3px color-mix(in oklch, var(--__xposter-export-signal), transparent 76%);
-      }
-      #${ARTICLE_EXPORT_ID} button:active {
-        transform: translateY(0) scale(0.985);
-      }
-      #${ARTICLE_EXPORT_ID} .__xposter_article_export_feedback {
-        max-width: min(100%, 460px);
-        color: var(--__xposter-export-muted);
-        font-size: 12px;
-        line-height: 1.35;
-      }
-      #${ARTICLE_EXPORT_ID} .__xposter_article_export_feedback:empty,
-      #${ARTICLE_EXPORT_ID} .__xposter_article_export_feedback[hidden] {
-        display: none;
-      }
-      #${ARTICLE_EXPORT_ID}[data-inline-feedback="done"] .__xposter_article_export_feedback {
-        color: color-mix(in oklch, var(--__xposter-export-ok), var(--__xposter-export-ink) 20%);
-      }
-      #${ARTICLE_EXPORT_ID}[data-inline-feedback="warn"] .__xposter_article_export_feedback,
-      #${ARTICLE_EXPORT_ID}[data-inline-feedback="error"] .__xposter_article_export_feedback {
-        color: var(--__xposter-export-danger);
-      }
-      #${ARTICLE_EXPORT_ID}[data-placement="fixed"] {
-        gap: 4px;
-        padding: 4px;
-        border: 1px solid var(--__xposter-export-line);
-        border-radius: 999px;
-        background: var(--__xposter-export-paper);
-        box-shadow: 0 8px 22px rgba(15, 20, 25, 0.10);
-      }
-      #${ARTICLE_EXPORT_ID}[data-placement="fixed"]:hover,
-      #${ARTICLE_EXPORT_ID}[data-placement="fixed"]:focus-within {
-        opacity: 1;
-        border-color: color-mix(in oklch, var(--__xposter-export-line), var(--__xposter-export-ink) 28%);
-        background: color-mix(in oklch, var(--__xposter-export-paper-2), var(--__xposter-export-paper) 54%);
-        box-shadow: 0 12px 28px rgba(15, 20, 25, 0.13);
-        transform: translate3d(0, -1px, 0);
-      }
-      #${ARTICLE_EXPORT_ID}[data-placement="fixed"] .__xposter_article_export_feedback {
-        position: absolute;
-        right: 0;
-        bottom: calc(100% + 8px);
-        width: max-content;
-        max-width: min(320px, calc(100vw - 32px));
-        padding: 8px 10px;
-        border: 1px solid var(--__xposter-export-line);
-        border-radius: 8px;
-        background: var(--__xposter-export-paper);
-        box-shadow: 0 8px 22px rgba(15, 20, 25, 0.10);
-        color: var(--__xposter-export-muted);
-        line-height: 1.35;
-      }
-      @keyframes __xposter_article_export_in {
-        from {
-          opacity: 0;
-          transform: translate3d(0, 4px, 0);
-        }
-        to {
-          opacity: 1;
-          transform: translate3d(0, 0, 0);
-        }
-      }
-      @keyframes __xposter_article_export_confirm {
-        0% {
-          transform: translate3d(0, 0, 0) scale(1);
-        }
-        45% {
-          transform: translate3d(0, -1px, 0) scale(1.02);
-        }
-        100% {
-          transform: translate3d(0, 0, 0) scale(1);
-        }
-      }
-      @media (prefers-color-scheme: dark) {
-        #${ARTICLE_EXPORT_ID} {
-          --__xposter-export-paper: #121a22;
-          --__xposter-export-paper-2: #1a2630;
-          --__xposter-export-ink: #d6dee6;
-          --__xposter-export-muted: #8b99a6;
-          --__xposter-export-line: #33414d;
-          --__xposter-export-signal: #66a9d8;
-          --__xposter-export-ok: #6fc8a4;
-          --__xposter-export-danger: #ef7d86;
-        }
-        #${ARTICLE_EXPORT_ID}[data-placement="fixed"] {
-          box-shadow: 0 12px 34px rgba(0, 0, 0, 0.30);
-        }
-        #${ARTICLE_EXPORT_ID}[data-placement="fixed"]:hover,
-        #${ARTICLE_EXPORT_ID}[data-placement="fixed"]:focus-within {
-          background: var(--__xposter-export-paper-2);
-        }
-      }
-      @media (prefers-reduced-motion: reduce) {
-        #${ARTICLE_EXPORT_ID},
-        #${ARTICLE_EXPORT_ID}[data-feedback],
-        #${ARTICLE_EXPORT_ID} .__xposter_article_export_actions,
-        #${ARTICLE_EXPORT_ID} button {
-          animation: none;
-          transition-duration: 0.01ms;
-        }
-        #${ARTICLE_EXPORT_ID}[data-placement="fixed"]:hover,
-        #${ARTICLE_EXPORT_ID}[data-placement="fixed"]:focus-within,
-        #${ARTICLE_EXPORT_ID} button {
-          transform: none;
-        }
-      }
-      @media (max-width: 720px) {
-        #${ARTICLE_EXPORT_ID}[data-placement="fixed"] {
-          right: max(12px, env(safe-area-inset-right));
-          bottom: max(14px, env(safe-area-inset-bottom));
-        }
-        #${ARTICLE_EXPORT_ID} {
-          max-width: calc(100vw - 24px);
-        }
-        #${ARTICLE_EXPORT_ID} .__xposter_article_export_feedback {
-          max-width: calc(100vw - 32px);
-        }
-      }
-    `;
-    document.head.appendChild(style);
   }
 
   function installImportButton() {
@@ -5458,11 +4281,6 @@
       sendResponse(retryActiveUpload());
       return false;
     }
-    if (message?.type === "xposter:success-celebration") {
-      showSuccessCelebration({ colors: Array.isArray(message.colors) ? message.colors : [] });
-      sendResponse({ ok: true });
-      return false;
-    }
     if (message?.type === "xposter:analyze-markdown") {
       try {
         const parsed = shared.parseMarkdown(message.markdown || "", normalizeImportOptions(message.options || {}));
@@ -5587,7 +4405,6 @@
   installContentLanguageSync();
   document.addEventListener("paste", onPaste, { capture: true });
   installImportButton();
-  installArticleExportButton();
   installDragDrop();
   resumePendingArticleImport().catch(() => {});
   waitForMainReady(2000).catch(() => {});
